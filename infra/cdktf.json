@@ -1,0 +1,11 @@
+{
+  "language": "go",
+  "app": "go run main.go",
+  "projectId": "a0f55557-45e3-4554-899b-995555555555",
+  "sendCrashReports": "false",
+  "terraformProviders": [
+    "kreuzwerker/docker@~>3.0.2"
+  ],
+  "context": {
+  }
+}
