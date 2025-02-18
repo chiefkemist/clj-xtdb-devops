@@ -1,0 +1,32 @@
+name: Dagger Build for Clojure Web Application
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  dagger-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.18'
+
+      - name: Set up Dagger CLI
+        run: |
+          curl -sfL https://get.dagger.io | sh
+          sudo mv dagger /usr/local/bin/
+
+      - name: Run Dagger Build for Clojure Web App
+        env:
+          SRC_DIR: ./my-app
+        run: |
+          dagger call build-clj-web-app --src-dir ./my-app
