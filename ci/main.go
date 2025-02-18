@@ -43,9 +43,10 @@ func (m *CljXtdbDevops) BuildCljWebApp(srcDir *dagger.Directory) {
 
 		jarFile := buildStage.File("target/my_app.jar")
 		runtimeStage := dag.Container(opts).From("openjdk:20-slim").
-			WithFile("/my_app.jar", jarFile).
+			WithExec([]string{"mkdir", "-p", "/app/target"}).
+			WithFile("/app/target/my_app.jar", jarFile).
 			WithExposedPort(58950).
-			WithEntrypoint([]string{"java", "-jar", "/my_app.jar"})
+			WithEntrypoint([]string{"java", "-jar", "/app/target/my_app.jar"})
 		return runtimeStage.Publish(ctx, publishTag)
 	}
 
