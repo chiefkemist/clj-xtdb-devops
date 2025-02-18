@@ -42,6 +42,8 @@ func (m *CljXtdbDevops) BuildCljWebApp(srcDir *dagger.Directory) {
 			WithExec([]string{"clojure", "-T:build", "jar"})
 		jarFile := buildStage.File("target/my_app.jar")
 		runtimeStage := dag.Container(opts).From("openjdk:20-slim").
+			// Ensure the /app/target directory exists.
+			WithExec([]string{"mkdir", "-p", "/app/target"}).
 			WithFile("/app/target/my_app.jar", jarFile).
 			WithExposedPort(58950).
 			WithEntrypoint([]string{"java", "-jar", "/app/target/my_app.jar"})
