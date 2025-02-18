@@ -36,17 +36,16 @@ type CljXtdbDevops struct{}
 func (m *CljXtdbDevops) BuildCljWebApp(srcDir *dagger.Directory) {
 	// Define a helper function to perform the build and publish stages.
 	buildAndPublish := func(opts dagger.ContainerOpts, publishTag string, ctx context.Context) (string, error) {
-		buildStage := dag.Container(opts).From("clojure:openjdk-17").Build(srcDir).
+		buildStage := dag.Container(opts).From("clojure:openjdk-17").
 			WithMountedDirectory("/app", srcDir).
 			WithWorkdir("/app").
 			WithExec([]string{"clojure", "-T:build", "jar"})
+
 		jarFile := buildStage.File("target/my_app.jar")
 		runtimeStage := dag.Container(opts).From("openjdk:20-slim").
-			// Ensure the /app/target directory exists.
-			WithExec([]string{"mkdir", "-p", "/app/target"}).
-			WithFile("/app/target/my_app.jar", jarFile).
+			WithFile("/my_app.jar", jarFile).
 			WithExposedPort(58950).
-			WithEntrypoint([]string{"java", "-jar", "/app/target/my_app.jar"})
+			WithEntrypoint([]string{"java", "-jar", "/my_app.jar"})
 		return runtimeStage.Publish(ctx, publishTag)
 	}
 

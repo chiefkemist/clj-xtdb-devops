@@ -1,0 +1,6 @@
+.aider*
+# Clojure build files
+target/
+.clj-kondo/
+.lsp/
+.cpcache/
