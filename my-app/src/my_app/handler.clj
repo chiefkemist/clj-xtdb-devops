@@ -4,12 +4,13 @@
             [ring.adapter.jetty :as jetty]
             [ring.middleware.json :refer [wrap-json-response wrap-json-body]]
             [ring.middleware.params :refer [wrap-params]]
-            [mount.core :as mount]
+            [mount.core :as mount :refer [defstate]]
             [cheshire.core :as json]
             [clojure.tools.logging :as log]
             [hiccup.core :as hiccup]
             [hiccup.form :as hf]
             [my-app.config :as config]
+            [my-app.seed :as seed]
             [ring.middleware.cors :refer [wrap-cors]])
   (:gen-class))
 
@@ -29,18 +30,20 @@
 (def error-handler-interceptor
   {:name ::error-handler
    :error (fn [context error]
-            (log/error "Error:" error)
+            (log/error "Error handling request:" (:request context))
+            (log/error "Error details:" error)
+            (log/error "Stack trace:" (.getStackTrace error))
             (let [status (if (instance? Exception error)
-                           (cond
-                             (and (.getCause error) (instance? java.io.IOException (.getCause error)))
-                             400  ; Bad Request for IOExceptions during body parsing
-                             (instance? xtdb.IllegalArgumentException error)
-                             400
-                             :else 500)
-                           500)]
+                          (cond
+                            (and (.getCause error) (instance? java.io.IOException (.getCause error)))
+                            400
+                            (instance? xtdb.IllegalArgumentException error)
+                            400
+                            :else 500)
+                          500)]
               (assoc context :response {:status status
-                                        :headers {"Content-Type" "text/plain"}
-                                        :body (str "Error: " (.getMessage error))})))})
+                                      :headers {"Content-Type" "text/plain"}
+                                      :body (str "Error: " (.getMessage error))})))})
 
 (def interceptor-chain
   [log-request-interceptor
@@ -60,12 +63,16 @@
   "Handles POST requests to create a new item.
   Expects a JSON body with :name and :description."
   [req]
-  (let [item (-> req :body)
+  (log/info "Creating new item:" (:body req))
+  (let [node @config/xtdb-node
+        item (-> req :body)
         valid-item (-> item
-                       (assoc :xt/id (java.util.UUID/randomUUID))
-                       (select-keys [:xt/id :name :description]))]
-    (xt/submit-tx (config/xtdb-node) [[:put valid-item]])
-    {:status 201 ; Created
+                      (assoc :xt/id (java.util.UUID/randomUUID))
+                      (select-keys [:xt/id :name :description]))]
+    (log/debug "Validated item:" valid-item)
+    (xt/submit-tx node [[:put-docs :items valid-item]])
+    (log/info "Item created successfully:" (:xt/id valid-item))
+    {:status 201
      :headers {"Content-Type" "application/json"}
      :body (json/generate-string valid-item)}))
 
@@ -73,15 +80,20 @@
   "Handles GET requests to list all items.
   Returns an HTML page with a list of items and a form to create a new item."
   [_req]
-  (let [items (xt/q (xt/db (config/xtdb-node))
-                    '{:find [(pull item [*])]
-                      :where [[item :xt/id]]})]
+  (log/info "Listing all items")
+  (let [node @config/xtdb-node
+        _ (log/info "XTDB node retrieved:" node)
+        _ (log/info "XTDB node status:" (xt/status node))
+        items (xt/q node {:query {:select {:items [*]}
+                                  :from [[:items]]}})]
+    (log/info "Query executed, found" (count items) "items")
+    (log/debug "Items:" items)
     (html-response
      [:div
       [:h1 "Items"]
       [:ul
        (for [item items]
-         [:li [:a {:href (str "/items/" (-> item first :xt/id))} (-> item first :name)]])]
+         [:li [:a {:href (str "/items/" (:xt/id item))} (:name item)]])]
       [:hr]
       [:h2 "Create Item"]
       (hf/form-to [:post "/items"]
@@ -97,39 +109,52 @@
   "Handles GET requests to retrieve a single item by ID.
   Returns an HTML page with the item details, or a 404 if not found."
   [req]
-  (let [id (-> req :path-params :id parse-uuid-str)]
-    (if-let [item (and id (xt/entity (xt/db (config/xtdb-node)) id))]
-      (html-response
-       [:div
-        [:h1 "Item Details"]
-        [:p "ID: " (str (:xt/id item))]
-        [:p "Name: " (:name item)]
-        [:p "Description: " (:description item)]
-        [:form {:method "post" :action (str "/items/" id "/delete")}
-         [:input {:type "submit" :value "Delete"}]]
-        [:hr]
-        [:h2 "Update Item"]
-        (hf/form-to [:put (str "/items/" id)]
-                    (hf/label "name" "Name:")
-                    (hf/text-field {:value (:name item)} "name")
-                    [:br]
-                    (hf/label "description" "Description:")
-                    (hf/text-area "description" (:description item))
-                    [:br]
-                    (hf/submit-button "Update"))])
-      {:status 404 :body "Item not found"})))
+  (let [node @config/xtdb-node
+        id (-> req :path-params :id parse-uuid-str)]
+    (log/info "Fetching item with ID:" id)
+    (if-let [item (and id (first (xt/q node 
+                                       {:query {:select {:items [*]}
+                                               :from [[:items]]
+                                               :where [[:= :xt/id id]]}})))]
+      (do
+        (log/debug "Found item:" item)
+        (html-response
+         [:div
+          [:h1 "Item Details"]
+          [:p "ID: " (str (:xt/id item))]
+          [:p "Name: " (:name item)]
+          [:p "Description: " (:description item)]
+          [:form {:method "post" :action (str "/items/" id "/delete")}
+           [:input {:type "submit" :value "Delete"}]]
+          [:hr]
+          [:h2 "Update Item"]
+          (hf/form-to [:put (str "/items/" id)]
+                      (hf/label "name" "Name:")
+                      (hf/text-field {:value (:name item)} "name")
+                      [:br]
+                      (hf/label "description" "Description:")
+                      (hf/text-area "description" (:description item))
+                      [:br]
+                      (hf/submit-button "Update"))]))
+      (do
+        (log/warn "Item not found:" id)
+        {:status 404 :body "Item not found"}))))
 
 (defn update-item-handler
   "Handles PUT requests to update an existing item.
   Expects a JSON body with :name and :description.
   Returns a 404 if the item is not found."
   [req]
-  (let [id (-> req :path-params :id parse-uuid-str)
+  (let [node @config/xtdb-node
+        id (-> req :path-params :id parse-uuid-str)
         updated-item (-> req :body)
-        existing-item (and id (xt/entity (xt/db (config/xtdb-node)) id))]
+        existing-item (and id (first (xt/q node 
+                                           {:query {:select {:items [*]}
+                                                   :from [[:items]]
+                                                   :where [[:= :xt/id id]]}})))]
     (if existing-item
       (do
-        (xt/submit-tx (config/xtdb-node) [[:put (merge existing-item updated-item {:xt/id id})]])
+        (xt/submit-tx node [[:put-docs :items (merge existing-item updated-item {:xt/id id})]])
         {:status 200
          :headers {"Content-Type" "application/json"}
          :body (json/generate-string (merge existing-item updated-item {:xt/id id}))})
@@ -139,22 +164,27 @@
   "Handles DELETE requests to delete an item by ID.
     Returns 204 No Content on success, or 404 if not found."
   [req]
-  (let [id (-> req :path-params :id parse-uuid-str)
-        existing-item (and id (xt/entity (xt/db (config/xtdb-node)) id))]
+  (let [node @config/xtdb-node
+        id (-> req :path-params :id parse-uuid-str)
+        existing-item (and id (first (xt/q node 
+                                           {:query {:select {:items [*]}
+                                                   :from [[:items]]
+                                                   :where [[:= :xt/id id]]}})))]
     (if existing-item
       (do
-        (xt/submit-tx (config/xtdb-node) [[:delete id]])
-        {:status 204 :body nil}) ; No Content
+        (xt/submit-tx node [[:delete-docs :items id]])
+        {:status 204 :body nil})
       {:status 404 :body "Item not found"})))
 
 (defn delete-item-post-handler
   "Handles POST requests to /items/:id/delete (used for form submission).
   Redirects to /items after deletion."
   [req]
-  (let [id (-> req :path-params :id parse-uuid-str)]
+  (let [node @config/xtdb-node
+        id (-> req :path-params :id parse-uuid-str)]
     (when id
-      (xt/submit-tx (config/xtdb-node) [[:delete id]]))
-    {:status 303 ; See Other
+      (xt/submit-tx node [[:delete-docs :items id]]))
+    {:status 303
      :headers {"Location" "/items"}}))
 
 (def app
@@ -180,12 +210,36 @@
    (ring/routes
     (ring/create-default-handler))))
 
-(mount/defstate server
-  :start (jetty/run-jetty app {:port port :join? false})
-  :stop (.stop server))
+;; Define server var before defstate
+(declare server)
 
+;; Define server as a mount state
+(defstate server
+  :start (do
+           (log/info "Starting web server on port" port)
+           (jetty/run-jetty app {:port port :join? false}))
+  :stop (do
+          (log/info "Stopping web server")
+          (.stop server)))
+
+;; Update the init! function to use seed.clj
+(defn init! []
+  (log/info "Initializing application...")
+  (mount/start)
+  (log/info "Mount states started:")
+  (log/info "Active states:" (mount/running-states))
+  (let [node @config/xtdb-node]
+    (log/info "XTDB connection test:")
+    (log/info "Node status:" (xt/status node))
+    (try
+      (seed/seed-data!)
+      (catch Exception e
+        (log/warn "Seed data may already exist:" (.getMessage e)))))
+  (log/info "Application started successfully"))
+
+;; Update main function to initialize mount
 (defn -main [& [port-arg]]
   (let [server-port (Integer. (or port-arg (System/getenv "PORT") (str port)))]
-    (alter-var-root #'my-app.handler/port (constantly server-port))
-    (mount/stop)
-    (mount/start)))
+    (alter-var-root #'port (constantly server-port))
+    (init!)
+    (log/info "Application started successfully")))

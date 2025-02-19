@@ -18,15 +18,15 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.18'
+          go-version: '1.23'
 
-      - name: Set up Dagger CLI
-        run: |
-          curl -sfL https://get.dagger.io | sh
-          sudo mv dagger /usr/local/bin/
+      - name: Install Dagger CLI
+        uses: dagger/dagger-for-github@v7
+        with:
+          version: "0.15.4"
 
-      - name: Run Dagger Build for Clojure Web App
-        env:
-          SRC_DIR: ./my-app
+      - name: Build and test with Dagger
+        working-directory: ./ci
         run: |
-          dagger call build-clj-web-app --src-dir ./my-app
+          go mod tidy
+          go run main.go build-clj-web-app --src-dir ../my-app
