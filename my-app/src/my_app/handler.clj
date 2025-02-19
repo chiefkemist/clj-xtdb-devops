@@ -63,14 +63,16 @@
   "Handles POST requests to create a new item.
   Expects a JSON body with :name and :description."
   [req]
-  (log/info "Creating new item:" (:body req))
-  (let [node @config/xtdb-node
-        item (-> req :body)
-        valid-item (-> item
-                      (assoc :xt/id (java.util.UUID/randomUUID))
-                      (select-keys [:xt/id :name :description]))]
-    (log/debug "Validated item:" valid-item)
-    (xt/submit-tx node [[:put-docs :items valid-item]])
+  (let [body (-> req :body)  ; body is already parsed to a map by wrap-json-body
+        _ (log/info "Creating new item:" body)
+        node @config/xtdb-node
+        valid-item (-> {:xt/id (java.util.UUID/randomUUID)
+                       :name (:name body)
+                       :description (:description body)})]
+    (log/info "Submitting transaction to create item:" valid-item)
+    (log/info "Transaction: [[:put-docs :items" valid-item "]]")
+    (let [tx-result (xt/submit-tx node [[:put-docs :items valid-item]])]
+      (log/info "Transaction result:" tx-result))
     (log/info "Item created successfully:" (:xt/id valid-item))
     {:status 201
      :headers {"Content-Type" "application/json"}
@@ -84,8 +86,7 @@
   (let [node @config/xtdb-node
         _ (log/info "XTDB node retrieved:" node)
         _ (log/info "XTDB node status:" (xt/status node))
-        items (xt/q node {:query {:select {:items [*]}
-                                  :from [[:items]]}})]
+        items (xt/q node '(from :items [*]))]
     (log/info "Query executed, found" (count items) "items")
     (log/debug "Items:" items)
     (html-response
@@ -112,10 +113,11 @@
   (let [node @config/xtdb-node
         id (-> req :path-params :id parse-uuid-str)]
     (log/info "Fetching item with ID:" id)
-    (if-let [item (and id (first (xt/q node 
-                                       {:query {:select {:items [*]}
-                                               :from [[:items]]
-                                               :where [[:= :xt/id id]]}})))]
+    (if-let [item (and id 
+                       (first (xt/q node 
+                                  '(from :items [*]
+                                    (where (= :xt/id ?id)))
+                                  {:args {:id id}})))]
       (do
         (log/debug "Found item:" item)
         (html-response
@@ -147,18 +149,28 @@
   [req]
   (let [node @config/xtdb-node
         id (-> req :path-params :id parse-uuid-str)
+        _ (log/info "Updating item with ID:" id)
         updated-item (-> req :body)
-        existing-item (and id (first (xt/q node 
-                                           {:query {:select {:items [*]}
-                                                   :from [[:items]]
-                                                   :where [[:= :xt/id id]]}})))]
+        _ (log/info "Update data:" updated-item)
+        existing-item (and id 
+                          (first (xt/q node 
+                                     '(from :items [*]
+                                       (where (= :xt/id ?id)))
+                                     {:args {:id id}})))]
     (if existing-item
       (do
-        (xt/submit-tx node [[:put-docs :items (merge existing-item updated-item {:xt/id id})]])
+        (log/info "Found existing item:" existing-item)
+        (let [merged-item (merge existing-item updated-item {:xt/id id})
+              _ (log/info "Submitting transaction to update item:" merged-item)
+              _ (log/info "Transaction: [[:put-docs :items" merged-item "]]")
+              tx-result (xt/submit-tx node [[:put-docs :items merged-item]])]
+          (log/info "Transaction result:" tx-result))
         {:status 200
          :headers {"Content-Type" "application/json"}
          :body (json/generate-string (merge existing-item updated-item {:xt/id id}))})
-      {:status 404 :body "Item not found"})))
+      (do
+        (log/warn "Item not found for update:" id)
+        {:status 404 :body "Item not found"}))))
 
 (defn delete-item-handler
   "Handles DELETE requests to delete an item by ID.
@@ -166,15 +178,23 @@
   [req]
   (let [node @config/xtdb-node
         id (-> req :path-params :id parse-uuid-str)
-        existing-item (and id (first (xt/q node 
-                                           {:query {:select {:items [*]}
-                                                   :from [[:items]]
-                                                   :where [[:= :xt/id id]]}})))]
+        _ (log/info "Attempting to delete item with ID:" id)
+        existing-item (and id 
+                          (first (xt/q node 
+                                     '(from :items [*]
+                                       (where (= :xt/id ?id)))
+                                     {:args {:id id}})))]
     (if existing-item
       (do
-        (xt/submit-tx node [[:delete-docs :items id]])
+        (log/info "Found item to delete:" existing-item)
+        (log/info "Submitting transaction to delete item:" id)
+        (log/info "Transaction: [[:delete-docs :items" id "]]")
+        (let [tx-result (xt/submit-tx node [[:delete-docs :items id]])]
+          (log/info "Transaction result:" tx-result))
         {:status 204 :body nil})
-      {:status 404 :body "Item not found"})))
+      (do
+        (log/warn "Item not found for deletion:" id)
+        {:status 404 :body "Item not found"}))))
 
 (defn delete-item-post-handler
   "Handles POST requests to /items/:id/delete (used for form submission).
@@ -183,7 +203,10 @@
   (let [node @config/xtdb-node
         id (-> req :path-params :id parse-uuid-str)]
     (when id
-      (xt/submit-tx node [[:delete-docs :items id]]))
+      (log/info "Submitting transaction to delete item (POST handler):" id)
+      (log/info "Transaction: [[:delete-docs :items" id "]]")
+      (let [tx-result (xt/submit-tx node [[:delete-docs :items id]])]
+        (log/info "Transaction result:" tx-result)))
     {:status 303
      :headers {"Location" "/items"}}))
 

@@ -41,12 +41,13 @@
       (let [node (xtc/start-client url)]
         (log/info "XTDB client started successfully")
         (log/info "Waiting for XTDB to be ready...")
-        (try  ;; Add try/catch to handle our success signal
-          (wait-for-xtdb node url 30)
+        (try
+          (let [ready-node (wait-for-xtdb node url 30)]
+            (atom ready-node))  ;; Wrap the node in an atom
           (catch clojure.lang.ExceptionInfo e
             (if (= "success" (.getMessage e))
-              (:node (ex-data e))  ;; Return the node on success
-              (throw e)))))  ;; Re-throw other exceptions
+              (atom (:node (ex-data e)))  ;; Wrap the node in an atom
+              (throw e)))))
       (catch Exception e
         (log/error "Failed to start XTDB client:" e)
         (throw e))))
@@ -55,7 +56,7 @@
   (do
     (log/info "Stopping XTDB client")
     (try
-      (.close xtdb-node)
+      (.close @xtdb-node)  ;; Deref the atom here
       (log/info "XTDB client stopped successfully")
       (catch Exception e
         (log/error "Error stopping XTDB client:" e)
