@@ -1,4 +1,4 @@
-module dagger/clj-xtdb-devops
+module github.com/chiefkemist/clj-xtdb-devops/ci
 
 go 1.23
 

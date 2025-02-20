@@ -16,10 +16,11 @@ package main
 
 import (
 	"context"
-	"dagger/clj-xtdb-devops/internal/dagger"
 	"fmt"
 	"log"
 	"time"
+
+	"github.com/chiefkemist/clj-xtdb-devops/ci/internal/dagger"
 )
 
 type CljXtdbDevops struct{}
