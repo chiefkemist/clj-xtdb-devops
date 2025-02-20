@@ -4,3 +4,4 @@ target/
 .clj-kondo/
 .lsp/
 .cpcache/
+.envrc

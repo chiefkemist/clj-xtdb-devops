@@ -34,7 +34,7 @@
   (throw (ex-info "Failed to connect to XTDB" {:url url})))
 
 (defstate ^:dynamic xtdb-node
-  :start 
+  :start
   (let [url (get-xtdb-url)]
     (log/info "Starting XTDB client, connecting to" url)
     (try
@@ -51,8 +51,8 @@
       (catch Exception e
         (log/error "Failed to start XTDB client:" e)
         (throw e))))
-  
-  :stop 
+
+  :stop
   (do
     (log/info "Stopping XTDB client")
     (try
@@ -61,3 +61,12 @@
       (catch Exception e
         (log/error "Error stopping XTDB client:" e)
         (throw e)))))
+
+(comment
+  (require 'my-app.config)
+  (in-ns 'my-app.config)
+  (require '[mount.core :as mount])
+  (mount/start)
+  (mount/stop)
+  ;;
+  )

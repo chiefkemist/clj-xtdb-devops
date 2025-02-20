@@ -1,5 +1,11 @@
 (ns my-app.handler
-  (:require [xtdb.api :as xt]
+  (:require [clojure.string :as clj-str]
+            [xtdb.api :as xt]
+            [honey.sql :as sql]
+            ;; [honey.sql.helpers :refer [select from where
+            ;;                            delete-from erase-from
+            ;;                            insert-into patch-into values
+            ;;                            records]]
             [reitit.ring :as ring]
             [ring.adapter.jetty :as jetty]
             [ring.middleware.json :refer [wrap-json-response wrap-json-body]]
@@ -34,16 +40,16 @@
             (log/error "Error details:" error)
             (log/error "Stack trace:" (.getStackTrace error))
             (let [status (if (instance? Exception error)
-                          (cond
-                            (and (.getCause error) (instance? java.io.IOException (.getCause error)))
-                            400
-                            (instance? xtdb.IllegalArgumentException error)
-                            400
-                            :else 500)
-                          500)]
+                           (cond
+                             (and (.getCause error) (instance? java.io.IOException (.getCause error)))
+                             400
+                             (instance? xtdb.IllegalArgumentException error)
+                             400
+                             :else 500)
+                           500)]
               (assoc context :response {:status status
-                                      :headers {"Content-Type" "text/plain"}
-                                      :body (str "Error: " (.getMessage error))})))})
+                                        :headers {"Content-Type" "text/plain"}
+                                        :body (str "Error: " (.getMessage error))})))})
 
 (def interceptor-chain
   [log-request-interceptor
@@ -67,11 +73,15 @@
         _ (log/info "Creating new item:" body)
         node @config/xtdb-node
         valid-item (-> {:xt/id (java.util.UUID/randomUUID)
-                       :name (:name body)
-                       :description (:description body)})]
+                        :name (:name body)
+                        :description (:description body)})]
     (log/info "Submitting transaction to create item:" valid-item)
-    (log/info "Transaction: [[:put-docs :items" valid-item "]]")
-    (let [tx-result (xt/submit-tx node [[:put-docs :items valid-item]])]
+    (log/info "Transaction: [:put-docs {:into :items} valid-item]")
+    ;; (let [tx-result (xt/submit-tx node [[:put-docs {:into :items} valid-item]])]
+    ;;   (log/info "Transaction result:" tx-result))
+    (let [tx-result (clj-str/join " "
+                                  (sql/format {:insert-into :items
+                                               :values [valid-item]}))]
       (log/info "Transaction result:" tx-result))
     (log/info "Item created successfully:" (:xt/id valid-item))
     {:status 201
@@ -86,7 +96,8 @@
   (let [node @config/xtdb-node
         _ (log/info "XTDB node retrieved:" node)
         _ (log/info "XTDB node status:" (xt/status node))
-        items (xt/q node '(from :items [*]))]
+        ;; items (xt/q node '(from :items [*]))
+        items (xt/q node (sql/format {:select [:*] :from :items}))]
     (log/info "Query executed, found" (count items) "items")
     (log/debug "Items:" items)
     (html-response
@@ -113,11 +124,15 @@
   (let [node @config/xtdb-node
         id (-> req :path-params :id parse-uuid-str)]
     (log/info "Fetching item with ID:" id)
-    (if-let [item (and id 
-                       (first (xt/q node 
-                                  '(from :items [*]
-                                    (where (= :xt/id ?id)))
-                                  {:args {:id id}})))]
+    (if-let [;; item (and id
+             ;;           (first (xt/q node
+             ;;                        '(from :items [*]
+             ;;                               (where (= :xt/id ?id)))
+             ;;                        {:args {:id id}})))
+             item (and id
+                       (first (xt/q node
+                                    (sql/format {:select [:*] :from :items
+                                                 :where [:= :xt/id id]}))))]
       (do
         (log/debug "Found item:" item)
         (html-response
@@ -152,18 +167,25 @@
         _ (log/info "Updating item with ID:" id)
         updated-item (-> req :body)
         _ (log/info "Update data:" updated-item)
-        existing-item (and id 
-                          (first (xt/q node 
-                                     '(from :items [*]
-                                       (where (= :xt/id ?id)))
-                                     {:args {:id id}})))]
+        ;; existing-item (and id
+        ;;                    (first (xt/q node
+        ;;                                 '(from :items [*]
+        ;;                                        (where (= :xt/id ?id)))
+        ;;                                 {:args {:id id}})))
+        existing-item (and id
+                           (first (xt/q node
+                                        (sql/format {:select [:*] :from :items
+                                                     :where [:= :xt/id id]}))))]
     (if existing-item
       (do
         (log/info "Found existing item:" existing-item)
         (let [merged-item (merge existing-item updated-item {:xt/id id})
               _ (log/info "Submitting transaction to update item:" merged-item)
-              _ (log/info "Transaction: [[:put-docs :items" merged-item "]]")
-              tx-result (xt/submit-tx node [[:put-docs :items merged-item]])]
+              _ (log/info "Transaction: [:put-docs {:into :items} merged-item]")
+              ;; tx-result (xt/submit-tx node [[:put-docs {:into :items} merged-item]])
+              tx-result (xt/submit-tx node [(clj-str/join " "
+                                                          (sql/format {:patch-into :items
+                                                                       :values [merged-item]}))])]
           (log/info "Transaction result:" tx-result))
         {:status 200
          :headers {"Content-Type" "application/json"}
@@ -179,17 +201,25 @@
   (let [node @config/xtdb-node
         id (-> req :path-params :id parse-uuid-str)
         _ (log/info "Attempting to delete item with ID:" id)
-        existing-item (and id 
-                          (first (xt/q node 
-                                     '(from :items [*]
-                                       (where (= :xt/id ?id)))
-                                     {:args {:id id}})))]
+        ;; existing-item (and id
+        ;;                    (first (xt/q node
+        ;;                                 '(from :items [*]
+        ;;                                        (where (= :xt/id ?id)))
+        ;;                                 {:args {:id id}})))
+        existing-item (and id
+                           (first (xt/q node
+                                        (sql/format {:select [:*] :from :items
+                                                     :where [:= :xt/id id]}))))]
     (if existing-item
       (do
         (log/info "Found item to delete:" existing-item)
         (log/info "Submitting transaction to delete item:" id)
-        (log/info "Transaction: [[:delete-docs :items" id "]]")
-        (let [tx-result (xt/submit-tx node [[:delete-docs :items id]])]
+        (log/info "Transaction: [:delete-docs {:from :items} id]")
+        ;; (let [tx-result (xt/submit-tx node [[:delete-docs {:from :items} id]])]
+        ;;   (log/info "Transaction result:" tx-result))
+        (let [tx-result (xt/submit-tx node [(clj-str/join " "
+                                                          (sql/format {:delete-from :items
+                                                                       :where [:= :xt/id id]}))])]
           (log/info "Transaction result:" tx-result))
         {:status 204 :body nil})
       (do
@@ -204,8 +234,12 @@
         id (-> req :path-params :id parse-uuid-str)]
     (when id
       (log/info "Submitting transaction to delete item (POST handler):" id)
-      (log/info "Transaction: [[:delete-docs :items" id "]]")
-      (let [tx-result (xt/submit-tx node [[:delete-docs :items id]])]
+      (log/info "Transaction: [:delete-docs {:from :items} id]")
+      ;; (let [tx-result (xt/submit-tx node [[:delete-docs {:from :items} id]])]
+      ;;   (log/info "Transaction result:" tx-result))
+      (let [tx-result (xt/submit-tx node [(clj-str/join " "
+                                                        (sql/format {:delete-from :items
+                                                                     :where [:= :xt/id id]}))])]
         (log/info "Transaction result:" tx-result)))
     {:status 303
      :headers {"Location" "/items"}}))
@@ -266,3 +300,58 @@
     (alter-var-root #'port (constantly server-port))
     (init!)
     (log/info "Application started successfully")))
+
+(comment
+  (in-ns 'my-app.handler)
+  ;; Imports
+  (require '[clojure.string :as clj-str])
+  (require '[xtdb.api :as xt])
+  (require '[honey.sql :as sql]
+           '[honey.sql.helpers :refer [select from where
+                                       delete-from erase-from
+                                       insert-into patch-into values
+                                       records]])
+
+  (require '[mount.core :as mount])
+  ;; Mount all states
+  (mount/start)
+  (mount/stop)
+  ;; XTDB node is available in the config namespace
+  (def node @config/xtdb-node)
+  ;;;; XTQL queries
+  ;; Queries
+  (xt/q node '(from :items [*]))
+  ;; Insert a new item
+  (def new-item {:xt/id (java.util.UUID/randomUUID)
+                 :name "Test Item"
+                 :description "This is a test item"})
+  (xt/submit-tx node [[:put-docs {:into :items} new-item]])
+  ;;;; HoneySQL queries
+  ;; Queries
+  (sql/format {:select [:*] :from :items})
+  (xt/q node (sql/format {:select [:*] :from :items}))
+  (xt/q node (sql/format {:select [:*] :from :items
+                          :where [:= :name "Test Item"]}))
+  ;; Insert a new item
+  (sql/format {:insert-into :items
+               :columns [:xt/id :name :description]
+               :values [new-item]})
+  (clj-str/join " "
+                (sql/format {:insert-into :items
+                                    ;; :columns [:xt/id :name :description] ;; not needed
+                             :values [new-item]}))
+  (xt/submit-tx node [(clj-str/join " "
+                                    (sql/format {:insert-into :items
+                                                        ;; :columns [:xt/id :name :description] ;; not needed
+                                                 :values [new-item]}))])
+  ;;Update an item
+  (xt/q node [(clj-str/join " "
+                            (sql/format {:patch-into :items
+                                         :values [{:description "Updated Item"}]
+                                         :where [:= :name "Test Item"]}))])
+  ;; Delete an item
+  (xt/submit-tx node [(clj-str/join " "
+                                    (sql/format {:delete-from :items
+                                                 :where [:= :name "Test Item"]}))])
+  ;;
+  )

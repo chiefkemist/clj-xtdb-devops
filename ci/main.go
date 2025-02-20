@@ -76,16 +76,7 @@ func (m *CljXtdbDevops) BuildXTDB() *dagger.Container {
 		WithExposedPort(5432)  // PostgreSQL
 }
 
-// BuildPgAdmin creates a pgAdmin container
-func (m *CljXtdbDevops) BuildPgAdmin() *dagger.Container {
-	fmt.Println("🏗️  Creating pgAdmin container...")
-	return dag.Container().From("dpage/pgadmin4:latest").
-		WithEnvVariable("PGADMIN_DEFAULT_EMAIL", "admin@admin.com").
-		WithEnvVariable("PGADMIN_DEFAULT_PASSWORD", "admin").
-		WithExposedPort(80)
-}
-
-// RunLocalDevelopment spins up both XTDB and pgAdmin containers
+// RunLocalDevelopment spins up XTDB container
 func (m *CljXtdbDevops) RunLocalDevelopment(ctx context.Context) *dagger.Service {
 	fmt.Println("🚀 Starting local development environment...")
 
@@ -95,33 +86,19 @@ func (m *CljXtdbDevops) RunLocalDevelopment(ctx context.Context) *dagger.Service
 		WithExposedPort(5432). // PostgreSQL
 		AsService()
 
-	fmt.Println("📦 Building pgAdmin container...")
-	pgAdmin := m.BuildPgAdmin().
-		WithExposedPort(80).
-		AsService()
-
 	fmt.Println("🔄 Starting XTDB service...")
-	if _, err := xtdb.Start(ctx); err != nil {
+	xtdbService, err := xtdb.Start(ctx)
+	if err != nil {
 		log.Fatalf("❌ failed to start XTDB: %v", err)
 	}
 	fmt.Println("✅ XTDB service started successfully")
-
-	fmt.Println("🔄 Starting pgAdmin service...")
-	pgAdminService, err := pgAdmin.Start(ctx)
-	if err != nil {
-		log.Fatalf("❌ failed to start pgAdmin: %v", err)
-	}
-	fmt.Println("✅ pgAdmin service started successfully")
 
 	fmt.Println("🎉 Local development environment ready!")
 	fmt.Println("📝 Access points:")
 	fmt.Println("  - XTDB HTTP API: http://localhost:3000")
 	fmt.Println("  - XTDB PostgreSQL: localhost:5432")
-	fmt.Println("  - pgAdmin: http://localhost:8080")
-	fmt.Println("    - Email: admin@admin.com")
-	fmt.Println("    - Password: admin")
 
-	return pgAdminService
+	return xtdbService
 }
 
 // RunLocalWebApp runs the Clojure web application locally with XTDB

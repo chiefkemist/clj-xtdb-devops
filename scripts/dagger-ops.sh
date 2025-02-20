@@ -14,7 +14,7 @@ echo_step() {
 # Function to run local development environment
 run_local() {
     echo_step "Starting local development environment..."
-    echo_step "This will start XTDB, pgAdmin, and the Clojure web application"
+    echo_step "This will start XTDB and the Clojure web application"
     
     cd ci
     dagger call run-local-web-app --src-dir ../my-app up \
@@ -31,21 +31,17 @@ run_local() {
 
 # Function to run just the database environment
 run_db() {
-    echo_step "Starting database environment (XTDB + pgAdmin)..."
+    echo_step "Starting database environment (XTDB)..."
     
     cd ci
     dagger call run-local-development up \
         --ports 3000:3000 \
-        --ports 5432:5432 \
-        --ports 8080:80
+        --ports 5432:5432
     
     echo_step "Database environment is running!"
     echo_step "Access points:"
     echo "  - XTDB HTTP API: http://localhost:3000"
     echo "  - XTDB PostgreSQL: localhost:5432"
-    echo "  - pgAdmin: http://localhost:8080"
-    echo "    - Email: admin@admin.com"
-    echo "    - Password: admin"
 }
 
 # Function to build and publish the web application
@@ -64,8 +60,8 @@ show_help() {
     echo "Usage: $0 [command]"
     echo
     echo "Commands:"
-    echo "  local    - Run full local environment (XTDB + pgAdmin + Web App)"
-    echo "  db       - Run only database environment (XTDB + pgAdmin)"
+    echo "  local    - Run full local environment (XTDB + Web App)"
+    echo "  db       - Run only database environment (XTDB)"
     echo "  publish  - Build and publish the web application"
     echo "  help     - Show this help message"
 }
