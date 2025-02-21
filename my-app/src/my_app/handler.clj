@@ -67,6 +67,9 @@
 ;; Add near the top with other declarations
 (def router-state (atom nil))
 
+;; Add to declarations
+(declare generate-slug)                   ; Generates URL-friendly unique slugs
+
 ;; Page handlers
 (defn home-handler 
   "Renders the welcome page with feature highlights and getting started button."
@@ -186,10 +189,12 @@
   [req]
   (let [body (:form-params req)
         node @config/xtdb-node
+        name (get body "name")
         valid-item {:xt/id (java.util.UUID/randomUUID)
-                   :name (get body "name")
+                   :name name
+                   :slug (generate-slug name)
                    :description (get body "description")
-                   :status (get body "status" "active")  ; Default to active
+                   :status (get body "status" "active")
                    :priority (get body "priority" "medium")
                    :tags (when-let [tags (get body "tags")]
                           (clj-str/split tags #",\s*"))
@@ -198,31 +203,31 @@
                    :assigned-to (get body "assigned-to")}]
     (xt/submit-tx node [[:put-docs {:into :items} valid-item]])
     {:status 303
-     :headers {"Location" "/items"}}))
+     :headers {"Location" (url-for ::items)}}))
 
 (defn get-item-handler
   "Handles GET requests to retrieve a single item by ID.
   Returns an HTML page with the item details, or a 404 if not found."
   [req]
   (let [node @config/xtdb-node
-        id (-> req :path-params :id parse-uuid-str)
+        slug (get-in req [:path-params :slug])
         tab (get-in req [:query-params "tab"] "details")]
-    (if-let [item (and id (first (xt/q node '(from :items [*] (where (= :xt/id ?id))) {:args {:id id}})))]
+    (if-let [item (first (xt/q node '(from :items [*] (where (= :slug ?slug))) {:args {:slug slug}}))]
       (let [content [:div {:class styles/container}
                     [:div {:class styles/card}
                      [:h1 {:class styles/heading-1} "Item Details"]
                      [:div {:class styles/tabs-list}
-                      [:a {:href (url-for ::item-get {:id (str id)})
+                      [:a {:href (url-for ::item-get {:slug (:slug item)})
                            :class (if (= tab "details") 
                                    styles/tab-item-active
                                    styles/tab-item)} 
                         "Details"]
-                      [:a {:href (url-for ::item-get {:id (str id)} {:tab "update"})
+                      [:a {:href (url-for ::item-get {:slug (:slug item)} {:tab "update"})
                            :class (if (= tab "update")
                                    styles/tab-item-active
                                    styles/tab-item)} 
                         "Update"]
-                      [:a {:href (url-for ::item-get {:id (str id)} {:tab "patch"})
+                      [:a {:href (url-for ::item-get {:slug (:slug item)} {:tab "patch"})
                            :class (if (= tab "patch")
                                    styles/tab-item-active
                                    styles/tab-item)}
@@ -238,64 +243,39 @@
   "Handles PUT requests to update an existing item."
   [req]
   (let [node @config/xtdb-node
-        id (-> req :path-params :id parse-uuid-str)
-        _ (log/info "Updating item with ID:" id)
+        slug (get-in req [:path-params :slug])
         body (if (= (get-in req [:headers "content-type"]) "application/json")
-               (:body req)  ; JSON request
-               (:form-params req))  ; Form submission
+               (:body req)
+               (:form-params req))
         updated-item {:name (get body "name")
-                     :description (get body "description")}
-        _ (log/info "Update data:" updated-item)]
-    (cond
-      (not (and (:name updated-item) (:description updated-item)))
-      (do
-        (log/warn "Missing required fields for PUT request")
-        {:status 400
-         :body "PUT requests require all fields (name and description)"})
-      
-      (not (first (xt/q node
+                     :description (get body "description")}]
+    (if-let [existing-item (first (xt/q node
                         '(from :items [*]
-                               (where (= :xt/id ?id)))
-                        {:args {:id id}})))
-      (do
-        (log/warn "Item not found for update:" id)
-        {:status 404 :body "Item not found"})
-      
-      :else
-      (do
-        (log/info "Replacing item with new data")
-        (let [new-item {:xt/id id
-                       :name (:name updated-item)
-                       :description (:description updated-item)}
-              tx-result (xt/submit-tx node [[:put-docs {:into :items} new-item]])]
-          (log/info "Transaction result:" tx-result)
-          (if (= (get-in req [:headers "content-type"]) "application/json")
-            ;; JSON API response
-            {:status 200
-             :headers {"Content-Type" "application/json"}
-             :body (json/generate-string new-item)}
-            ;; Form submission redirect
+                                              (where (= :slug ?slug)))
+                                       {:args {:slug slug}}))]
+      (let [new-item (merge existing-item updated-item)]
+        (xt/submit-tx node [[:put-docs {:into :items} new-item]])
             {:status 303
-             :headers {"Location" (url-for ::item-get {:id (str id)})}}))))))
+         :headers {"Location" (url-for ::item-get {:slug slug})}})
+      {:status 404 :body "Item not found"})))
 
 (defn patch-item-handler
   "Handles PATCH requests to partially update an item."
   [req]
   (let [node @config/xtdb-node
-        id (-> req :path-params :id parse-uuid-str)
+        slug (get-in req [:path-params :slug])
         form-params (:form-params req)
-        ;; Only include non-empty values using seq instead of (not (empty?))
         updates (into {} (filter (fn [[_ v]] (seq v))
                                {:name (get form-params "name")
                                 :description (get form-params "description")}))]
     (if-let [existing-item (first (xt/q node
                                        '(from :items [*]
-                                              (where (= :xt/id ?id)))
-                                       {:args {:id id}}))]
-      (let [merged-item (merge existing-item updates {:xt/id id})]
+                                              (where (= :slug ?slug)))
+                                       {:args {:slug slug}}))]
+      (let [merged-item (merge existing-item updates)]
         (xt/submit-tx node [[:put-docs {:into :items} merged-item]])
         {:status 303
-         :headers {"Location" (url-for ::item-get {:id (str id)})}})
+         :headers {"Location" (url-for ::item-get {:slug slug})}})
       {:status 404 
        :body "Item not found"})))
 
@@ -304,12 +284,12 @@
   Redirects to /items after deletion."
   [req]
   (let [node @config/xtdb-node
-        id (-> req :path-params :id parse-uuid-str)]
-    (when id
-      (log/info "Submitting transaction to delete item (POST handler):" id)
-      (log/info "Transaction: [:delete-docs {:from :items} id]")
-      (let [tx-result (xt/submit-tx node [[:delete-docs {:from :items} id]])]
-        (log/info "Transaction result:" tx-result)))
+        slug (get-in req [:path-params :slug])]
+    (when-let [item (first (xt/q node
+                                '(from :items [*]
+                                       (where (= :slug ?slug)))
+                                {:args {:slug slug}}))]
+      (xt/submit-tx node [[:delete-docs {:from :items} (:xt/id item)]]))
     {:status 303
      :headers {"Location" (url-for ::items)}}))
 
@@ -383,37 +363,31 @@
                        :get {:handler home-handler
                  :interceptors interceptor-chain}}]
                  ["/items" {:name ::items
-                            :get {:handler list-items-handler
+                           :get {:handler list-items-handler
                       :interceptors interceptor-chain}
                 :post {:handler create-item-handler
-                       :interceptors interceptor-chain}}]
-                 ["/items/new" {:name ::item-new
-                                :get {:handler create-item-form-handler
-                                      :interceptors interceptor-chain}}]
-                 ["/items/:id/get" {:name ::item-get
-                                    :get {:handler get-item-handler
-                          :interceptors interceptor-chain}}]
-                 ["/items/:id/update" {:name ::item-update
-                                      :get {:handler get-item-handler
-                                            :interceptors interceptor-chain}
-                                      :post {:handler update-item-handler
                                  :interceptors interceptor-chain}}]
-                 ["/items/:id/patch" {:name ::item-patch
-                                      :get {:handler get-item-handler
-                                            :interceptors interceptor-chain}
+                 ["/items/new" {:name ::item-new
+                               :get {:handler create-item-form-handler
+                                    :interceptors interceptor-chain}}]
+                 ["/items/:slug/get" {:name ::item-get
+                                 :get {:handler get-item-handler
+                                      :interceptors interceptor-chain}}]
+                 ["/items/:slug/update" {:name ::item-update
+                                       :post {:handler update-item-handler
+                                             :interceptors interceptor-chain}}]
+                 ["/items/:slug/patch" {:name ::item-patch
                                       :post {:handler patch-item-handler
                                 :interceptors interceptor-chain}}]
-                 ["/items/:id/delete" {:name ::item-delete
-                                      :post {:handler delete-item-post-handler
+                 ["/items/:slug/delete" {:name ::item-delete
+                                       :post {:handler delete-item-post-handler
                                  :interceptors interceptor-chain}}]]
     {:data {:middleware [wrap-params
                         wrap-json-response
                         [wrap-json-body {:keywords? true}]
                         [wrap-cors :access-control-allow-origin [#".*"]
                          :access-control-allow-methods [:get :post]]]}})
-        handler (ring/ring-handler
-                router
-                (ring/create-default-handler))]
+        handler (ring/ring-handler router (ring/create-default-handler))]
     (reset! router-state router)
     handler))
 
@@ -535,7 +509,7 @@
                         (str (subs desc 0 100) "...")
                         desc)]
     [:li {:class styles/item-list-item}
-     [:a {:href (url-for ::item-get {:id (str (:xt/id item))})
+     [:a {:href (url-for ::item-get {:slug (:slug item)})
           :class styles/item-link}
       [:div {:class styles/item-content}
        [:div {:class styles/item-header}
@@ -581,6 +555,16 @@
      (if query-params
        (str base-url "?" (ring.util.codec/form-encode query-params))
        base-url))))
+
+(defn generate-slug
+  "Generates a URL-friendly slug from a name with a random suffix"
+  [name]
+  (let [base-slug (-> name
+                      clojure.string/lower-case
+                      (clojure.string/replace #"[^a-z0-9]+" "-")
+                      (clojure.string/replace #"^-+|-+$" ""))
+        random-suffix (-> (random-uuid) str (subs 0 8))]
+    (str base-slug "-" random-suffix)))
 
 ;; Update the format-date function to use correct tick functions
 (defn format-date
@@ -663,8 +647,8 @@
      [:span {:class styles/item-details-value} (:assigned-to item)]]]
    [:div {:class "flex justify-end mt-4"}
     [:form {:method "post" 
-            :action (url-for ::item-delete {:id (str (:xt/id item))})
-            :hx-post (url-for ::item-delete {:id (str (:xt/id item))})
+            :action (url-for ::item-delete {:slug (:slug item)})
+            :hx-post (url-for ::item-delete {:slug (:slug item)})
             :hx-target "main"
             :hx-swap "outerHTML"}
      [:button {:type "submit" :class styles/button-danger} "Delete"]]]])
@@ -673,14 +657,15 @@
 (defn render-item-update-form [item]
   [:div {:class "mt-6"}
    [:form {:method "post" 
-           :action (url-for ::item-update {:id (str (:xt/id item))})
+           :action (url-for ::item-update {:slug (:slug item)})
            :class styles/form-container}
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Name *"]
      [:input {:type "text" 
              :name "name"
              :value (:name item)
-             :required true
+            ;;  :required true
+             :readonly true
              :class styles/input}]]
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Description *"]
@@ -730,12 +715,13 @@
 (defn render-item-patch-form [item]
   [:div {:class "mt-6"}
    [:form {:method "post" 
-           :action (url-for ::item-patch {:id (str (:xt/id item))})
+           :action (url-for ::item-patch {:slug (:slug item)})
            :class styles/form-container}
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Name (optional)"]
      [:input {:type "text"
              :name "name"
+             :disabled true
              :placeholder (:name item)
              :class styles/input}]]
     [:div {:class styles/form-group}

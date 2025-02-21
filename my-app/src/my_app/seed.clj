@@ -6,6 +6,7 @@
 (def seed-items
   [{:xt/id #uuid "550e8400-e29b-41d4-a716-446655440000"
     :name "Implement Authentication"
+    :slug "implement-authentication-a1b2c3d4"
     :description "Add user authentication with OAuth2 support"
     :status "active"
     :priority "high"
@@ -16,6 +17,7 @@
 
    {:xt/id #uuid "550e8400-e29b-41d4-a716-446655440001"
     :name "Fix Memory Leak"
+    :slug "fix-memory-leak-a1b2c3d4"
     :description "Investigate and fix memory leak in background process"
     :status "pending"
     :priority "high"
@@ -26,6 +28,7 @@
 
    {:xt/id #uuid "550e8400-e29b-41d4-a716-446655440002"
     :name "Update Documentation"
+    :slug "update-documentation-a1b2c3d4"
     :description "Update API documentation with new endpoints"
     :status "completed"
     :priority "low"
@@ -36,6 +39,7 @@
 
    {:xt/id #uuid "550e8400-e29b-41d4-a716-446655440003"
     :name "Add Dark Mode"
+    :slug "add-dark-mode-a1b2c3d4"
     :description "Implement dark mode theme support"
     :status "active"
     :priority "medium"
@@ -46,6 +50,7 @@
 
    {:xt/id #uuid "550e8400-e29b-41d4-a716-446655440004"
     :name "Optimize Database Queries"
+    :slug "optimize-database-queries-a1b2c3d4"
     :description "Improve performance of slow database queries"
     :status "pending"
     :priority "high"
@@ -56,6 +61,7 @@
 
    {:xt/id #uuid "550e8400-e29b-41d4-a716-446655440005"
     :name "Archive Old Records"
+    :slug "archive-old-records-a1b2c3d4"
     :description "Implement data archival process for old records"
     :status "archived"
     :priority "low"
