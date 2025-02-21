@@ -1,7 +1,5 @@
 (ns my-app.seed
-  (:require [clojure.string :as clj-str]
-            [honey.sql :as sql]
-            [xtdb.api :as xt]
+  (:require [xtdb.api :as xt]
             [my-app.config :as config]
             [clojure.tools.logging :as log]))
 
@@ -17,15 +15,10 @@
                 :name "Sample Item 3"
                 :description "Yet another sample item"}]]
     (log/info "Seeding database with sample items...")
-    ;; (doseq [item items]
-    ;;   (log/debug "Adding item:" item)
-    ;;   (xt/submit-tx node
-    ;;                 [[:put-docs :items item]]))
     (doseq [item items]
       (log/debug "Adding item:" item)
-      (xt/submit-tx node [(clj-str/join " "
-                                        (sql/format {:insert-into :items
-                                                     :values [item]}))]))
+      (xt/submit-tx node
+                    [[:put-docs :items item]]))
     (log/info "Seed data added successfully")))
 
 (comment

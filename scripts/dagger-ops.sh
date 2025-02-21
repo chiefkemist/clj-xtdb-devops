@@ -20,13 +20,15 @@ run_local() {
     dagger call run-local-web-app --src-dir ../my-app up \
         --ports 58950:58950 \
         --ports 3000:3000 \
-        --ports 5432:5432
+        --ports 5432:5432 \
+        --ports 8080:8080
     
     echo_step "Local environment is running!"
     echo_step "Access points:"
     echo "  - Web App: http://localhost:58950"
     echo "  - XTDB HTTP API: http://localhost:3000"
     echo "  - XTDB PostgreSQL: localhost:5432"
+    echo "  - XTDB Health: http://localhost:8080/healthz/alive"
 }
 
 # Function to run just the database environment
@@ -36,12 +38,14 @@ run_db() {
     cd ci
     dagger call run-local-development up \
         --ports 3000:3000 \
-        --ports 5432:5432
+        --ports 5432:5432 \
+        --ports 8080:8080
     
     echo_step "Database environment is running!"
     echo_step "Access points:"
     echo "  - XTDB HTTP API: http://localhost:3000"
     echo "  - XTDB PostgreSQL: localhost:5432"
+    echo "  - XTDB Health: http://localhost:8080/healthz/alive"
 }
 
 # Function to build and publish the web application

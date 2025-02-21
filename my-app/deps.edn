@@ -17,7 +17,7 @@
         org.fusesource.jansi/jansi {:mvn/version "2.4.1"}
         com.github.seancorfield/honeysql {:mvn/version "2.6.1270"}}
 
- :paths ["src" "test"]
+ :paths ["src" "resources" "test"]
  :aliases {:dev {:extra-deps {ring/ring-mock {:mvn/version "0.3.2"}}
                  :main-opts ["-m" "my-app.handler"]
                  :jvm-opts ["--add-opens=java.base/java.nio=ALL-UNNAMED"

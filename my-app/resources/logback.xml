@@ -1,4 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+  <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener" />
+
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <withJansi>true</withJansi>
     <encoder>
@@ -6,9 +9,12 @@
     </encoder>
   </appender>
 
-  <logger name="xtdb" level="INFO"/>
+  <!-- Application loggers -->
+  <logger name="my_app" level="DEBUG"/>
+  <logger name="xtdb" level="DEBUG"/>
   
-  <logger name="my-app" level="DEBUG"/>
+  <!-- Third-party loggers -->
+  <logger name="org.eclipse.jetty" level="WARN"/>
   
   <root level="INFO">
     <appender-ref ref="STDOUT" />

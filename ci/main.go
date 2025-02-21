@@ -74,7 +74,8 @@ func (m *CljXtdbDevops) BuildXTDB() *dagger.Container {
 		WithEnvVariable("XTDB_ENABLE_QUERY_CACHE", "true").
 		WithEnvVariable("XTDB_QUERY_CACHE_SIZE", "10000").
 		WithExposedPort(3000). // HTTP API
-		WithExposedPort(5432)  // PostgreSQL
+		WithExposedPort(5432). // PostgreSQL
+		WithExposedPort(8080)  // Monitoring/healthz endpoints
 }
 
 // RunLocalDevelopment spins up XTDB container
@@ -85,6 +86,7 @@ func (m *CljXtdbDevops) RunLocalDevelopment(ctx context.Context) *dagger.Service
 	xtdb := m.BuildXTDB().
 		WithExposedPort(3000). // HTTP API
 		WithExposedPort(5432). // PostgreSQL
+		WithExposedPort(8080). // Monitoring/healthz endpoints
 		AsService()
 
 	fmt.Println("🔄 Starting XTDB service...")
@@ -98,6 +100,7 @@ func (m *CljXtdbDevops) RunLocalDevelopment(ctx context.Context) *dagger.Service
 	fmt.Println("📝 Access points:")
 	fmt.Println("  - XTDB HTTP API: http://localhost:3000")
 	fmt.Println("  - XTDB PostgreSQL: localhost:5432")
+	fmt.Println("  - XTDB Monitoring: http://localhost:8080")
 
 	return xtdbService
 }
@@ -108,8 +111,9 @@ func (m *CljXtdbDevops) RunLocalWebApp(ctx context.Context, srcDir *dagger.Direc
 
 	fmt.Println("📦 Building XTDB container...")
 	xtdb := m.BuildXTDB().
-		WithExposedPort(3000).
-		WithExposedPort(5432).
+		WithExposedPort(3000). // HTTP API
+		WithExposedPort(5432). // PostgreSQL
+		WithExposedPort(8080). // Monitoring/healthz endpoints
 		AsService()
 
 	fmt.Println("🔄 Starting XTDB service...")
@@ -139,7 +143,7 @@ func (m *CljXtdbDevops) RunLocalWebApp(ctx context.Context, srcDir *dagger.Direc
 	fmt.Println("  - Web Application: http://localhost:58950")
 	fmt.Println("  - XTDB HTTP API: http://localhost:3000")
 	fmt.Println("  - XTDB PostgreSQL: localhost:5432")
-
+	fmt.Println("  - XTDB Monitoring: http://localhost:8080")
 	return webAppService
 }
 
