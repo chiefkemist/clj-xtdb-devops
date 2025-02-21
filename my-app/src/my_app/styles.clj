@@ -35,6 +35,38 @@
   "mt-1 block w-full rounded-md border-gray-300 shadow-sm 
    focus:border-blue-500 focus:ring-blue-500 sm:text-sm h-32")
 
+(def select
+  "mt-1 block w-full rounded-md border-gray-300 shadow-sm 
+   focus:border-blue-500 focus:ring-blue-500 sm:text-sm")
+
+(def tag
+  "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
+   bg-blue-100 text-blue-800 mr-2")
+
+(def status-badge
+  "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium")
+
+(def status-active
+  "bg-green-100 text-green-800")
+
+(def status-completed
+  "bg-gray-100 text-gray-800")
+
+(def status-pending
+  "bg-yellow-100 text-yellow-800")
+
+(def status-archived
+  "bg-red-100 text-red-800")
+
+(def priority-high
+  "bg-red-100 text-red-800")
+
+(def priority-medium
+  "bg-yellow-100 text-yellow-800")
+
+(def priority-low
+  "bg-green-100 text-green-800")
+
 ;; Buttons
 (def button-primary
   "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium 
@@ -145,4 +177,51 @@
   "col-span-1")
 
 (def main-content
-  "col-span-3") 
+  "col-span-3")
+
+;; Search and filter styles
+(def search-container
+  "bg-white rounded-lg shadow-sm p-4 mb-6")
+
+(def search-row
+  "flex items-center gap-4 mb-4")
+
+(def search-input
+  "flex-1 rounded-md border-gray-300 shadow-sm 
+   focus:border-blue-500 focus:ring-blue-500")
+
+(def input-help
+  "text-sm text-gray-500 ml-2")
+
+(def button-secondary
+  "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium 
+   rounded-md text-gray-700 bg-white hover:bg-gray-50 
+   focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500")
+
+;; Enhanced item display
+(def item-header
+  "flex justify-between items-center mb-2")
+
+(def item-meta
+  "flex items-center space-x-2")
+
+(def meta-text
+  "text-sm text-gray-500")
+
+(def item-description
+  "text-sm text-gray-600 line-clamp-2")
+
+(def item-footer
+  "flex justify-between items-center mt-2")
+
+(def tags-container
+  "flex flex-wrap gap-1")
+
+(def header-row
+  "flex justify-between items-center mb-6")
+
+(def form-row
+  "grid grid-cols-2 gap-4")
+
+(def form-actions
+  "flex justify-end space-x-4 mt-8") 
