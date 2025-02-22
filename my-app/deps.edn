@@ -1,4 +1,5 @@
 {:deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        org.clojure/core.async {:mvn/version "1.7.701"}
         hiccup/hiccup {:mvn/version "1.0.5"}
         com.xtdb/xtdb-api {:mvn/version "2.0.0-beta6"}
         com.xtdb/xtdb-http-client-jvm {:mvn/version "2.0.0-beta6"}

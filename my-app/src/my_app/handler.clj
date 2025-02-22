@@ -3,6 +3,8 @@
    Provides routing, request handling, and CRUD operations for items.
    Uses XTDB for persistence and HTMX for dynamic updates."
   (:require [clojure.string :as clj-str]
+            [clojure.core.async :as async :refer [<!! <! >! chan go pipeline-async pipeline-blocking to-chan! to-chan!!]]
+            [clojure.walk :refer [keywordize-keys]]
             [xtdb.api :as xt]
             [honey.sql :as sql]
             [reitit.ring :as ring]
@@ -10,7 +12,6 @@
             [ring.middleware.json :refer [wrap-json-response wrap-json-body]]
             [ring.middleware.params :refer [wrap-params]]
             [mount.core :as mount :refer [defstate]]
-            [cheshire.core :as json]
             [clojure.tools.logging :as log]
             [my-app.config :as config]
             [my-app.seed :as seed]
@@ -38,8 +39,7 @@
 (declare delete-item-post-handler)        ; POST /items/:id/delete - Delete item
 
 ;; Query and rendering functions
-(declare build-query)                     ; Constructs XTQL query from filters
-(declare execute-query)                   ; Executes query with temporal support
+(declare run-search)                      ; Runs a search query on the XTDB node
 (declare render-item)                     ; Renders item as Hiccup markup
 
 ;; Helper functions
@@ -71,16 +71,16 @@
 (declare generate-slug)                   ; Generates URL-friendly unique slugs
 
 ;; Page handlers
-(defn home-handler 
+(defn home-handler
   "Renders the welcome page with feature highlights and getting started button."
   [_req]
   (layout "Welcome"
           [:div {:class styles/welcome-section}
            [:div {:class styles/welcome-content}
-            [:h1 {:class styles/welcome-heading} 
+            [:h1 {:class styles/welcome-heading}
              "Welcome to XTDB Items Manager"]
-            [:p {:class styles/welcome-description} 
-             "A modern web application showcasing XTDB integration with Clojure, 
+            [:p {:class styles/welcome-description}
+             "A modern web application showcasing XTDB integration with Clojure,
               featuring a clean interface and robust data management capabilities."]
             [:div {:class styles/features-container}
              [:h2 {:class styles/heading-2} "Key Features"]
@@ -99,80 +99,76 @@
                "Modern, responsive design for all devices"]]]
             [:div {:class "mt-8"}
              [:a.btn {:href (url-for ::items)
-                      :class styles/get-started-button} 
+                      :class styles/get-started-button}
               "Get Started →"]]]]))
 
 ;; CRUD handlers
 (defn list-items-handler
   "Lists all items and provides a form to create new ones.
    Supports both full page loads and HTMX partial updates."
-  [req]
+  [{:keys [query-params] :as req}]
   (let [node @config/xtdb-node
-        search (get-in req [:query-params "search"])
-        status (get-in req [:query-params "status"])
-        priority (get-in req [:query-params "priority"])
-        assigned-to (get-in req [:query-params "assigned-to"])
-        tag (get-in req [:query-params "tag"])
-        as-of (some-> (get-in req [:query-params "as-of"])
-                     parse-datetime)
-        query (build-query search status priority assigned-to tag)
+        {:keys [search status priority
+                assigned-to tag as-of]} (keywordize-keys query-params)
         params {:search search
-                                        :status status
-                                        :priority priority
-                                        :assigned-to assigned-to
-                                        :tag tag}
-        items (execute-query node query params as-of)
+                :status status
+                :priority priority
+                :assigned-to assigned-to
+                :tag tag
+                :as-of (parse-datetime as-of)}
+        ;; _ (println "List items with filter parameters: " params)
+        items (run-search node params)
         content [:div {:class styles/container}
-                [:div {:class styles/header-row}
-                [:h1 {:class styles/heading-1} "Items"]
-                 [:a {:href (url-for ::item-new)
-                      :class styles/button-primary}
-                  "Create New Item"]]
+                 [:div {:class styles/header-row}
+                  [:h1 {:class styles/heading-1} "Items"]
+                  [:a {:href (url-for ::item-new)
+                       :class styles/button-primary}
+                   "Create New Item"]]
                 ;; Search and filter form
-                [:form {:method "get" :class styles/search-container}
-                 [:div {:class styles/search-row}
-                  [:input {:type "text"
-                          :name "search"
-                          :value search
-                          :placeholder "Search items..."
-                          :class styles/search-input}]
-                  [:select {:name "status" :class styles/select}
-                   [:option {:value ""} "All Statuses"]
-                   [:option {:value "active"} "Active"]
-                   [:option {:value "completed"} "Completed"]
-                   [:option {:value "pending"} "Pending"]
-                   [:option {:value "archived"} "Archived"]]
-                  [:select {:name "priority" :class styles/select}
-                   [:option {:value ""} "All Priorities"]
-                   [:option {:value "high"} "High"]
-                   [:option {:value "medium"} "Medium"]
-                   [:option {:value "low"} "Low"]]
-                  [:input {:type "text"
-                          :name "assigned-to"
-                          :value assigned-to
-                          :placeholder "Assigned to..."
-                          :class styles/input}]
-                  [:input {:type "text"
-                          :name "tag"
-                          :value tag
-                          :placeholder "Filter by tag..."
-                          :class styles/input}]]
-                 [:div {:class styles/search-row}
-                  [:input {:type "datetime-local"
-                          :name "as-of"
-                          :value as-of
-                          :class styles/input}]
-                  [:span {:class styles/input-help}
-                   "View items as of this date"]
-                  [:button {:type "submit"
-                           :class styles/button-primary}
-                   "Search"]
-                  [:a {:href (url-for ::items)
-                      :class styles/button-secondary}
-                   "Clear"]]]
+                 [:form {:method "get" :class styles/search-container}
+                  [:div {:class styles/search-row}
+                   [:input {:type "text"
+                            :name "search"
+                            :value search
+                            :placeholder "Search items..."
+                            :class styles/search-input}]
+                   [:select {:name "status" :class styles/select}
+                    [:option {:value ""} "All Statuses"]
+                    [:option {:value "active"} "Active"]
+                    [:option {:value "completed"} "Completed"]
+                    [:option {:value "pending"} "Pending"]
+                    [:option {:value "archived"} "Archived"]]
+                   [:select {:name "priority" :class styles/select}
+                    [:option {:value ""} "All Priorities"]
+                    [:option {:value "high"} "High"]
+                    [:option {:value "medium"} "Medium"]
+                    [:option {:value "low"} "Low"]]
+                   [:input {:type "text"
+                            :name "assigned-to"
+                            :value assigned-to
+                            :placeholder "Assigned to..."
+                            :class styles/input}]
+                   [:input {:type "text"
+                            :name "tag"
+                            :value tag
+                            :placeholder "Filter by tag..."
+                            :class styles/input}]]
+                  [:div {:class styles/search-row}
+                   [:input {:type "datetime-local"
+                            :name "as-of"
+                            :value as-of
+                            :class styles/input}]
+                   [:span {:class styles/input-help}
+                    "View items as of this date"]
+                   [:button {:type "submit"
+                             :class styles/button-primary}
+                    "Search"]
+                   [:a {:href (url-for ::items)
+                        :class styles/button-secondary}
+                    "Clear"]]]
                 ;; Items list
-                [:ul {:class styles/item-list}
-                 (map render-item items)]]
+                 [:ul {:class styles/item-list}
+                  (map render-item items)]]
         ;; Check if this is a boosted request
         is-boosted? (get-in req [:headers "hx-boosted"])]
     (if is-boosted?
@@ -191,16 +187,16 @@
         node @config/xtdb-node
         name (get body "name")
         valid-item {:xt/id (java.util.UUID/randomUUID)
-                   :name name
-                   :slug (generate-slug name)
-                   :description (get body "description")
-                   :status (get body "status" "active")
-                   :priority (get body "priority" "medium")
-                   :tags (when-let [tags (get body "tags")]
-                          (clj-str/split tags #",\s*"))
-                   :created-at (java.time.Instant/now)
-                   :due-date (get body "due-date")
-                   :assigned-to (get body "assigned-to")}]
+                    :name name
+                    :slug (generate-slug name)
+                    :description (get body "description")
+                    :status (get body "status" "active")
+                    :priority (get body "priority" "medium")
+                    :tags (when-let [tags (get body "tags")]
+                            (clj-str/split tags #",\s*"))
+                    :created-at (java.time.Instant/now)
+                    :due-date (get body "due-date")
+                    :assigned-to (get body "assigned-to")}]
     (xt/submit-tx node [[:put-docs {:into :items} valid-item]])
     {:status 303
      :headers {"Location" (url-for ::items)}}))
@@ -208,87 +204,91 @@
 (defn get-item-handler
   "Handles GET requests to retrieve a single item by ID.
   Returns an HTML page with the item details, or a 404 if not found."
-  [req]
+  [{:keys [path-params query-params] :as _req}]
   (let [node @config/xtdb-node
-        slug (get-in req [:path-params :slug])
-        tab (get-in req [:query-params "tab"] "details")]
-    (if-let [item (first (xt/q node '(from :items [*] (where (= :slug ?slug))) {:args {:slug slug}}))]
+        slug (path-params :slug)
+        ;; _ (println "Slug: " slug)
+        tab (or (query-params "tab") "details")]
+    (if-let [;;item (first (xt/q node '(from :items [{:slug slug} *])))
+             item (first
+                   (xt/q node (sql/format {:select [:*] :from :items
+                                           :where [:= :slug slug]})))]
       (let [content [:div {:class styles/container}
-                    [:div {:class styles/card}
-                     [:h1 {:class styles/heading-1} "Item Details"]
-                     [:div {:class styles/tabs-list}
-                      [:a {:href (url-for ::item-get {:slug (:slug item)})
-                           :class (if (= tab "details") 
-                                   styles/tab-item-active
-                                   styles/tab-item)} 
+                     [:div {:class styles/card}
+                      [:h1 {:class styles/heading-1} "Item Details"]
+                      [:div {:class styles/tabs-list}
+                       [:a {:href (url-for ::item-get {:slug (:slug item)})
+                            :class (if (= tab "details")
+                                     styles/tab-item-active
+                                     styles/tab-item)}
                         "Details"]
-                      [:a {:href (url-for ::item-get {:slug (:slug item)} {:tab "update"})
-                           :class (if (= tab "update")
-                                   styles/tab-item-active
-                                   styles/tab-item)} 
+                       [:a {:href (url-for ::item-get {:slug (:slug item)} {:tab "update"})
+                            :class (if (= tab "update")
+                                     styles/tab-item-active
+                                     styles/tab-item)}
                         "Update"]
-                      [:a {:href (url-for ::item-get {:slug (:slug item)} {:tab "patch"})
-                           :class (if (= tab "patch")
-                                   styles/tab-item-active
-                                   styles/tab-item)}
+                       [:a {:href (url-for ::item-get {:slug (:slug item)} {:tab "patch"})
+                            :class (if (= tab "patch")
+                                     styles/tab-item-active
+                                     styles/tab-item)}
                         "Patch"]]
-                     (case tab
-                       "details" (render-item-details item)
-                       "update"  (render-item-update-form item)
-                       "patch"   (render-item-patch-form item))]]]
+                      (case tab
+                        "details" (render-item-details item)
+                        "update"  (render-item-update-form item)
+                        "patch"   (render-item-patch-form item))]]]
         (layout (str "Item - " (:name item)) content))
       {:status 404 :body "Item not found"})))
 
 (defn update-item-handler
   "Handles PUT requests to update an existing item."
-  [req]
+  [{:keys [path-params] :as req}]
   (let [node @config/xtdb-node
-        slug (get-in req [:path-params :slug])
+        slug (path-params :slug)
+        ;; _ (println "Slug: " slug)
         body (if (= (get-in req [:headers "content-type"]) "application/json")
                (:body req)
                (:form-params req))
         updated-item {:name (get body "name")
-                     :description (get body "description")}]
-    (if-let [existing-item (first (xt/q node
-                        '(from :items [*]
-                                              (where (= :slug ?slug)))
-                                       {:args {:slug slug}}))]
+                      :description (get body "description")}]
+    (if-let [;;existing-item (first (xt/q node '(from :items [{:slug slug} *])))
+             existing-item (first
+                            (xt/q node (sql/format {:select [:*] :from :items
+                                                    :where [:= :slug slug]})))]
       (let [new-item (merge existing-item updated-item)]
         (xt/submit-tx node [[:put-docs {:into :items} new-item]])
-            {:status 303
+        {:status 303
          :headers {"Location" (url-for ::item-get {:slug slug})}})
       {:status 404 :body "Item not found"})))
 
 (defn patch-item-handler
   "Handles PATCH requests to partially update an item."
-  [req]
+  [{:keys [path-params] :as req}]
   (let [node @config/xtdb-node
-        slug (get-in req [:path-params :slug])
+        slug (path-params :slug)
+        ;; _ (println "Slug: " slug)
         form-params (:form-params req)
         updates (into {} (filter (fn [[_ v]] (seq v))
-                               {:name (get form-params "name")
-                                :description (get form-params "description")}))]
-    (if-let [existing-item (first (xt/q node
-                                       '(from :items [*]
-                                              (where (= :slug ?slug)))
-                                       {:args {:slug slug}}))]
+                                 {:name (get form-params "name")
+                                  :description (get form-params "description")}))]
+    (if-let [;;existing-item (first (xt/q node '(from :items [{:slug slug} *])))
+             existing-item (first
+                            (xt/q node (sql/format {:select [:*] :from :items
+                                                    :where [:= :slug slug]})))]
       (let [merged-item (merge existing-item updates)]
         (xt/submit-tx node [[:put-docs {:into :items} merged-item]])
         {:status 303
          :headers {"Location" (url-for ::item-get {:slug slug})}})
-      {:status 404 
+      {:status 404
        :body "Item not found"})))
 
 (defn delete-item-post-handler
   "Handles POST requests to /items/:id/delete (used for form submission).
   Redirects to /items after deletion."
-  [req]
+  [{:keys [path-params] :as req}]
   (let [node @config/xtdb-node
-        slug (get-in req [:path-params :slug])]
-    (when-let [item (first (xt/q node
-                                '(from :items [*]
-                                       (where (= :slug ?slug)))
-                                {:args {:slug slug}}))]
+        slug (path-params :slug)]
+    (println "Slug: " slug)
+    (when-let [item (first (xt/q node '(from :items [{:slug slug} *])))]
       (xt/submit-tx node [[:delete-docs {:from :items} (:xt/id item)]]))
     {:status 303
      :headers {"Location" (url-for ::items)}}))
@@ -299,19 +299,19 @@
   (let [content [:div {:class styles/container}
                  [:h1 {:class styles/heading-1} "Create New Item"]
                  [:form {:method "post"
-                        :action "/items"
-                        :class styles/form-container}
+                         :action "/items"
+                         :class styles/form-container}
                   [:div {:class styles/form-group}
                    [:label {:class styles/label} "Name *"]
                    [:input {:type "text"
-                           :name "name"
-                           :required true
-                           :class styles/input}]]
+                            :name "name"
+                            :required true
+                            :class styles/input}]]
                   [:div {:class styles/form-group}
                    [:label {:class styles/label} "Description *"]
                    [:textarea {:name "description"
-                             :required true
-                             :class styles/textarea}]]
+                               :required true
+                               :class styles/textarea}]]
                   [:div {:class styles/form-row}
                    [:div {:class styles/form-group}
                     [:label {:class styles/label} "Status"]
@@ -329,28 +329,27 @@
                   [:div {:class styles/form-group}
                    [:label {:class styles/label} "Tags"]
                    [:input {:type "text"
-                           :name "tags"
-                           :placeholder "tag1, tag2, tag3"
-                           :class styles/input}]]
+                            :name "tags"
+                            :placeholder "tag1, tag2, tag3"
+                            :class styles/input}]]
                   [:div {:class styles/form-row}
                    [:div {:class styles/form-group}
                     [:label {:class styles/label} "Due Date"]
                     [:input {:type "date"
-                            :name "due-date"
-                            :class styles/input}]]
+                             :name "due-date"
+                             :class styles/input}]]
                    [:div {:class styles/form-group}
                     [:label {:class styles/label} "Assigned To"]
                     [:input {:type "text"
-                            :name "assigned-to"
-                            :class styles/input}]]]
+                             :name "assigned-to"
+                             :class styles/input}]]]
                   [:div {:class styles/form-actions}
                    [:button {:type "submit"
-                            :class styles/button-primary}
+                             :class styles/button-primary}
                     "Create Item"]
                    [:a {:href (url-for ::items)
-                       :class styles/button-secondary}
-                    "Cancel"]]]]
-        ]
+                        :class styles/button-secondary}
+                    "Cancel"]]]]]
     (layout "Create Item" content)))
 
 ;; Router configuration
@@ -361,32 +360,32 @@
   (let [router (ring/router
                 [["/" {:name ::home
                        :get {:handler home-handler
-                 :interceptors interceptor-chain}}]
+                             :interceptors interceptor-chain}}]
                  ["/items" {:name ::items
-                           :get {:handler list-items-handler
-                      :interceptors interceptor-chain}
-                :post {:handler create-item-handler
-                                 :interceptors interceptor-chain}}]
+                            :get {:handler list-items-handler
+                                  :interceptors interceptor-chain}
+                            :post {:handler create-item-handler
+                                   :interceptors interceptor-chain}}]
                  ["/items/new" {:name ::item-new
-                               :get {:handler create-item-form-handler
-                                    :interceptors interceptor-chain}}]
-                 ["/items/:slug/get" {:name ::item-get
-                                 :get {:handler get-item-handler
+                                :get {:handler create-item-form-handler
                                       :interceptors interceptor-chain}}]
+                 ["/items/:slug/get" {:name ::item-get
+                                      :get {:handler get-item-handler
+                                            :interceptors interceptor-chain}}]
                  ["/items/:slug/update" {:name ::item-update
-                                       :post {:handler update-item-handler
-                                             :interceptors interceptor-chain}}]
+                                         :post {:handler update-item-handler
+                                                :interceptors interceptor-chain}}]
                  ["/items/:slug/patch" {:name ::item-patch
-                                      :post {:handler patch-item-handler
-                                :interceptors interceptor-chain}}]
+                                        :post {:handler patch-item-handler
+                                               :interceptors interceptor-chain}}]
                  ["/items/:slug/delete" {:name ::item-delete
-                                       :post {:handler delete-item-post-handler
-                                 :interceptors interceptor-chain}}]]
-    {:data {:middleware [wrap-params
-                        wrap-json-response
-                        [wrap-json-body {:keywords? true}]
-                        [wrap-cors :access-control-allow-origin [#".*"]
-                         :access-control-allow-methods [:get :post]]]}})
+                                         :post {:handler delete-item-post-handler
+                                                :interceptors interceptor-chain}}]]
+                {:data {:middleware [wrap-params
+                                     wrap-json-response
+                                     [wrap-json-body {:keywords? true}]
+                                     [wrap-cors :access-control-allow-origin [#".*"]
+                                      :access-control-allow-methods [:get :post]]]}})
         handler (ring/ring-handler router (ring/create-default-handler))]
     (reset! router-state router)
     handler))
@@ -464,41 +463,60 @@
    :error (fn [context error]
             (log/error "Error handling request:" error)
             (let [status (if (instance? Exception error)
-                          (cond
-                            (instance? xtdb.IllegalArgumentException error) 400
-                            :else 500)
-                          500)]
+                           (cond
+                             (instance? xtdb.IllegalArgumentException error) 400
+                             :else 500)
+                           500)]
               (assoc context :response {:status status
-                                      :body (str "Error: " (.getMessage error))})))})
+                                        :body (str "Error: " (.getMessage error))})))})
 
 (def interceptor-chain
   "Order of interceptors to be applied to all routes"
   [log-request-interceptor
    error-handler-interceptor])
 
-;; Query building and execution implementations
-(defn build-query
-  "Constructs an XTQL query based on filter parameters.
-   Returns a query that filters items based on provided criteria."
-  [search status priority assigned-to tag]
-  (let [base-query '(from :items [*])]
-    (cond-> base-query
-      search (concat '((where (or (str-contains? name ?search)
-                                 (str-contains? description ?search)))))
-      status (concat '((where (= status ?status))))
-      priority (concat '((where (= priority ?priority))))
-      assigned-to (concat '((where (= assigned-to ?assigned-to))))
-      tag (concat '((where (contains? tags ?tag)))))))
-
-(defn execute-query
-  "Executes an XTQL query with optional temporal parameters.
-   Supports as-of queries for temporal features."
-  [node query params as-of]
-  (let [query-args {:args params}
-        query-args (if as-of 
-                    (assoc query-args :as-of as-of)
-                    query-args)]
-    (xt/q node query query-args)))
+(defn run-search
+  "Runs a search query on the XTDB node with the given parameters.
+   Returns a list of items that match the search criteria."
+  [node {:keys [search status priority assigned-to tag] :as params}]
+  (log/debug "Running search with params: " params)
+  (let [filters (atom {})
+        filter-by-description (if search {:description search} {})
+        filter-by-name (if search {:name search} {})
+        concurrency 2
+        out-chan (chan)]
+    (when assigned-to (swap! filters assoc :assigned-to assigned-to))
+    (when priority (swap! filters assoc :priority priority))
+    (when status (swap! filters assoc :status status))
+    (when tag (swap! filters assoc :tag tag))
+    (let [run-query (fn [filter]
+                      (let [search-filters (merge filter @filters)
+                            result (if (empty? search-filters)
+                                     (xt/q node '(from :items [*]))
+                                     (xt/q node '(from :items [search-filters *])))]
+                        (println "Filter: " filter)
+                        (println "Common Filter: " @filters)
+                        (println "Searching for: " search-filters)
+                      ;; (log/debug "Searching for: " search-filters " returned: " result)
+                        result)
+                      ;; (let [search-filters (merge filter @filters)
+                      ;;       result (if (empty? search-filters)
+                      ;;                (xt/q node (sql/format {:select [:*] :from :items}))
+                      ;;                (let [sql (sql/format {:select (into [] (keys search-filters)) :from :items
+                      ;;                                       :where (into []
+                      ;;                                                    (cons :and (map #(into [] (cons := %))
+                      ;;                                                                    (vec search-filters))))})]
+                      ;;                  (println "SQL: " sql)
+                      ;;                  (xt/q node sql)))]
+                      ;;   result)
+                      )
+          in-chan (to-chan!!
+                   [filter-by-description filter-by-name])]
+      (pipeline-blocking concurrency out-chan (map run-query) in-chan))
+    (<!! (go
+           (let [results (-> (<! (async/into [] out-chan)) concat distinct first)]
+             (log/debug "Count: " (count results) "Results: " results)
+             (distinct (concat results)))))))
 
 (defn render-item
   "Renders a single item as Hiccup markup.
@@ -506,8 +524,8 @@
   [item]
   (let [desc (:description item)
         truncated-desc (if (> (count desc) 100)
-                        (str (subs desc 0 100) "...")
-                        desc)]
+                         (str (subs desc 0 100) "...")
+                         desc)]
     [:li {:class styles/item-list-item}
      [:a {:href (url-for ::item-get {:slug (:slug item)})
           :class styles/item-link}
@@ -515,21 +533,21 @@
        [:div {:class styles/item-header}
         [:span {:class styles/item-text} (:name item)]
         [:div {:class styles/item-meta}
-         [:span {:class (str styles/status-badge " " 
-                           (get {"active" styles/status-active
-                                "completed" styles/status-completed
-                                "pending" styles/status-pending
-                                "archived" styles/status-archived}
-                                (:status item)))}
+         [:span {:class (str styles/status-badge " "
+                             (get {"active" styles/status-active
+                                   "completed" styles/status-completed
+                                   "pending" styles/status-pending
+                                   "archived" styles/status-archived}
+                                  (:status item)))}
           (:status item)]
          [:span {:class (str styles/status-badge " "
-                           (get {"high" styles/priority-high
-                                "medium" styles/priority-medium
-                                "low" styles/priority-low}
-                                (:priority item)))}
+                             (get {"high" styles/priority-high
+                                   "medium" styles/priority-medium
+                                   "low" styles/priority-low}
+                                  (:priority item)))}
           (:priority item)]]]
        [:div {:class styles/item-details}
-        [:p {:class styles/item-description} 
+        [:p {:class styles/item-description}
          truncated-desc]
         [:div {:class styles/item-footer}
          [:div {:class styles/tags-container}
@@ -577,13 +595,13 @@
         (-> date
             t/date  ; For date strings like "2024-03-15"
             (t/format (t/formatter "MMM d, yyyy")))
-        
+
         (instance? java.time.Instant date)
         (-> date
             t/instant  ; For Instant timestamps
             (t/in "UTC")
             (t/format (t/formatter "MMM d, yyyy HH:mm")))
-        
+
         :else
         (str date))
       (catch Exception _
@@ -591,20 +609,20 @@
 
 ;; Add reusable components
 (defn render-status-badge [status]
-  [:span {:class (str styles/status-badge " " 
-                     (get {"active" styles/status-active
-                          "completed" styles/status-completed
-                          "pending" styles/status-pending
-                          "archived" styles/status-archived}
-                          status))}
+  [:span {:class (str styles/status-badge " "
+                      (get {"active" styles/status-active
+                            "completed" styles/status-completed
+                            "pending" styles/status-pending
+                            "archived" styles/status-archived}
+                           status))}
    status])
 
 (defn render-priority-badge [priority]
   [:span {:class (str styles/status-badge " "
-                     (get {"high" styles/priority-high
-                          "medium" styles/priority-medium
-                          "low" styles/priority-low}
-                          priority))}
+                      (get {"high" styles/priority-high
+                            "medium" styles/priority-medium
+                            "low" styles/priority-low}
+                           priority))}
    priority])
 
 (defn render-tags [tags]
@@ -636,7 +654,7 @@
      [:span {:class styles/item-details-value} (render-tags (:tags item))]]
     [:div {:class styles/item-details-row}
      [:strong {:class styles/item-details-label} "Created: "]
-     [:span {:class styles/item-details-value} 
+     [:span {:class styles/item-details-value}
       (when-let [created-at (:created-at item)]
         (format-date created-at))]]
     [:div {:class styles/item-details-row}
@@ -646,7 +664,7 @@
      [:strong {:class styles/item-details-label} "Assigned To: "]
      [:span {:class styles/item-details-value} (:assigned-to item)]]]
    [:div {:class "flex justify-end mt-4"}
-    [:form {:method "post" 
+    [:form {:method "post"
             :action (url-for ::item-delete {:slug (:slug item)})
             :hx-post (url-for ::item-delete {:slug (:slug item)})
             :hx-target "main"
@@ -656,79 +674,79 @@
 ;; Update form component
 (defn render-item-update-form [item]
   [:div {:class "mt-6"}
-   [:form {:method "post" 
+   [:form {:method "post"
            :action (url-for ::item-update {:slug (:slug item)})
            :class styles/form-container}
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Name *"]
-     [:input {:type "text" 
-             :name "name"
-             :value (:name item)
+     [:input {:type "text"
+              :name "name"
+              :value (:name item)
             ;;  :required true
-             :readonly true
-             :class styles/input}]]
+              :readonly true
+              :class styles/input}]]
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Description *"]
      [:textarea {:name "description"
-                :required true
-                :class styles/textarea} (:description item)]]
+                 :required true
+                 :class styles/textarea} (:description item)]]
     [:div {:class styles/form-row}
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Status"]
       [:select {:name "status" :class styles/select}
        (for [status ["active" "pending" "completed" "archived"]]
          [:option {:value status
-                  :selected (= status (:status item))} 
+                   :selected (= status (:status item))}
           status])]]
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Priority"]
       [:select {:name "priority" :class styles/select}
        (for [priority ["high" "medium" "low"]]
          [:option {:value priority
-                  :selected (= priority (:priority item))} 
+                   :selected (= priority (:priority item))}
           priority])]]]
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Tags"]
      [:input {:type "text"
-             :name "tags"
-             :value (when (:tags item)
-                     (clojure.string/join ", " (:tags item)))
-             :placeholder "tag1, tag2, tag3"
-             :class styles/input}]]
+              :name "tags"
+              :value (when (:tags item)
+                       (clojure.string/join ", " (:tags item)))
+              :placeholder "tag1, tag2, tag3"
+              :class styles/input}]]
     [:div {:class styles/form-row}
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Due Date"]
       [:input {:type "date"
-              :name "due-date"
-              :value (:due-date item)
-              :class styles/input}]]
+               :name "due-date"
+               :value (:due-date item)
+               :class styles/input}]]
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Assigned To"]
       [:input {:type "text"
-              :name "assigned-to"
-              :value (:assigned-to item)
-              :class styles/input}]]]
+               :name "assigned-to"
+               :value (:assigned-to item)
+               :class styles/input}]]]
     [:div {:class "flex justify-end mt-4"}
      [:button {:type "submit" :class styles/button-primary} "Update"]]]])
 
 ;; Update the patch form component to include all fields
 (defn render-item-patch-form [item]
   [:div {:class "mt-6"}
-   [:form {:method "post" 
+   [:form {:method "post"
            :action (url-for ::item-patch {:slug (:slug item)})
            :class styles/form-container}
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Name (optional)"]
      [:input {:type "text"
-             :name "name"
-             :disabled true
-             :placeholder (:name item)
-             :class styles/input}]]
+              :name "name"
+              :disabled true
+              :placeholder (:name item)
+              :class styles/input}]]
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Description (optional)"]
      [:textarea {:name "description"
-                :placeholder (:description item)
-                :class styles/textarea}]]
+                 :placeholder (:description item)
+                 :class styles/textarea}]]
     [:div {:class styles/form-row}
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Status (optional)"]
@@ -745,23 +763,23 @@
     [:div {:class styles/form-group}
      [:label {:class styles/label} "Tags (optional)"]
      [:input {:type "text"
-             :name "tags"
-             :placeholder (when (:tags item)
-                          (clojure.string/join ", " (:tags item)))
-             :class styles/input}]]
+              :name "tags"
+              :placeholder (when (:tags item)
+                             (clojure.string/join ", " (:tags item)))
+              :class styles/input}]]
     [:div {:class styles/form-row}
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Due Date (optional)"]
       [:input {:type "date"
-              :name "due-date"
-              :placeholder (:due-date item)
-              :class styles/input}]]
+               :name "due-date"
+               :placeholder (:due-date item)
+               :class styles/input}]]
      [:div {:class styles/form-group}
       [:label {:class styles/label} "Assigned To (optional)"]
       [:input {:type "text"
-              :name "assigned-to"
-              :placeholder (:assigned-to item)
-              :class styles/input}]]]
+               :name "assigned-to"
+               :placeholder (:assigned-to item)
+               :class styles/input}]]]
     [:div {:class "flex justify-end mt-4"}
      [:button {:type "submit" :class styles/button-primary} "Patch"]]]])
 
@@ -783,6 +801,15 @@
   ;; Mount all states
   (mount/start)
   (mount/stop)
+  ;; Do imports
+  (do
+    (in-ns 'my-app.handler)
+    (require '[clojure.string :as clj-str])
+    (require '[xtdb.api :as xt])
+    (require '[honey.sql :as sql])
+    (require '[mount.core :as mount])
+    ;;
+    )
   ;; XTDB node is available in the config namespace
   (def node @config/xtdb-node)
   ;;;; XTQL queries

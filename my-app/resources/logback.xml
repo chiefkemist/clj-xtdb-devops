@@ -1,22 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-  <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener" />
-
+  <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener"/>
   <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
     <withJansi>true</withJansi>
     <encoder>
       <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%logger{36}) - %msg%n</pattern>
     </encoder>
   </appender>
-
   <!-- Application loggers -->
   <logger name="my_app" level="DEBUG"/>
   <logger name="xtdb" level="DEBUG"/>
-  
   <!-- Third-party loggers -->
-  <logger name="org.eclipse.jetty" level="WARN"/>
-  
+  <logger name="org.eclipse.jetty.http" level="WARN"/>
+  <logger name="org.eclipse.jetty.io" level="WARN"/>
+  <logger name="org.eclipse.jetty.util" level="WARN"/>
   <root level="INFO">
-    <appender-ref ref="STDOUT" />
+    <appender-ref ref="STDOUT"/>
   </root>
-</configuration> 
+</configuration>
