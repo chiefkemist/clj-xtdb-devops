@@ -28,6 +28,6 @@ jobs:
       - name: Build and test with Dagger
         working-directory: .
         run: |
-          pwd # Prints the current directory
+          pwd
           dagger call build-and-publish-clj-web-app --src-dir my-app
 ```
