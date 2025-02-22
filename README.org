@@ -1,0 +1,420 @@
+#+TITLE: Clojure XTDB DevOps Project
+#+AUTHOR: ChiefKemist
+#+DATE: 2024-03-15
+#+OPTIONS: toc:3
+
+* Table of Contents :toc:
+- [[#overview][Overview]]
+- [[#architecture][Architecture]]
+- [[#components][Components]]
+- [[#development][Development]]
+- [[#deployment][Deployment]]
+- [[#monitoring][Monitoring]]
+- [[#references][References]]
+
+* Overview
+:PROPERTIES:
+:CUSTOM_ID: overview
+:END:
+
+** Project Description
+
+This project demonstrates cutting-edge DevOps practices for orchestrating CI/CD pipelines for a Clojure web application using XTDB. It combines modern development tools and practices to create a robust, scalable, and maintainable system.
+
+** Key Features
+
+*** Application Features
+- Full-featured Clojure web application
+- XTDB database for robust data management
+- RESTful API endpoints
+- Dynamic UI with HTMX
+- Responsive design with Tailwind CSS
+
+*** DevOps Features
+- Container-based development and deployment
+- Dagger-powered CI/CD pipeline
+- Infrastructure as Code using CDK for Terraform
+- AWS ECS for container orchestration
+- Automated testing and deployment
+- Local development environment with Docker
+- Monitoring and logging infrastructure
+
+** Technology Stack
+
+*** Backend
+- Clojure 1.12
+- XTDB 2.0.0-beta6
+- Ring (Web Server)
+- Reitit (Routing)
+- Mount (State Management)
+
+*** Frontend
+- HTMX
+- Tailwind CSS
+- Hiccup (HTML Templates)
+
+*** DevOps
+- Dagger
+- CDK for Terraform
+- Docker
+- GitHub Actions
+
+* Architecture
+:PROPERTIES:
+:CUSTOM_ID: architecture
+:END:
+
+** System Architecture
+
+#+begin_src mermaid
+graph TB
+    Client[Web Browser] -->|HTTP/HTMX| WebApp[Clojure Web App]
+    WebApp -->|Query| XTDB[XTDB Service]
+    
+    subgraph "Development Tools"
+        GitHub[GitHub] -->|Trigger| Actions[GitHub Actions]
+        Actions -->|Build| Dagger[Dagger Pipeline]
+        Dagger -->|Test & Build| Container[Container Image]
+    end
+#+end_src
+
+** Application Flow
+
+#+begin_src mermaid
+sequenceDiagram
+    participant Client as Web Browser
+    participant App as Clojure App
+    participant DB as XTDB
+    
+    Client->>App: HTTP Request
+    App->>App: Route Request
+    App->>DB: Query Data
+    DB-->>App: Query Result
+    App->>App: Generate HTML
+    App-->>Client: HTTP Response + HTMX
+    
+    Note over Client,App: HTMX enables<br/>dynamic updates
+    Note over DB: XTDB provides<br/>temporal queries
+#+end_src
+
+** DevOps Pipeline
+
+#+begin_src mermaid
+graph LR
+    Dev[Developer] -->|Push| Git[GitHub]
+    
+    subgraph "CI Pipeline"
+        Git -->|Trigger| Actions[GitHub Actions]
+        Actions -->|Execute| Dagger[Dagger Pipeline]
+        Dagger -->|Run| Tests[Unit Tests]
+        Dagger -->|Build| Image[Container Image]
+        Dagger -->|Scan| Security[Security Scan]
+    end
+    
+    subgraph "Quality Gates"
+        Tests -->|Verify| Coverage[Code Coverage]
+        Security -->|Check| CVE[CVE Database]
+        Coverage -->|Report| Quality[Quality Report]
+        CVE -->|Alert| Quality
+    end
+#+end_src
+
+** Container Architecture
+
+#+begin_src mermaid
+graph TB
+    subgraph "Local Development"
+        Dev[Developer] -->|Build| LocalApp[Local Container]
+        LocalApp -->|Connect| LocalDB[XTDB Container]
+    end
+    
+    subgraph "Container Services"
+        WebApp[Web App Container]
+        XTDB[XTDB Container]
+        WebApp -->|Query| XTDB
+    end
+#+end_src 
+
+* Components
+:PROPERTIES:
+:CUSTOM_ID: components
+:END:
+
+** Clojure Web Application
+
+*** Core Dependencies
+The application uses modern Clojure libraries for web development:
+
+#+begin_src clojure
+;; deps.edn
+{:deps {org.clojure/clojure {:mvn/version "1.12.0"}
+        org.clojure/core.async {:mvn/version "1.7.701"}
+        com.xtdb/xtdb-api {:mvn/version "2.0.0-beta6"}
+        com.xtdb/xtdb-core {:mvn/version "2.0.0-beta6"}
+        metosin/reitit {:mvn/version "0.6.0"}
+        ring/ring-jetty-adapter {:mvn/version "1.13.0"}
+        mount/mount {:mvn/version "0.1.17"}
+        hiccup/hiccup {:mvn/version "1.0.5"}}}
+#+end_src
+
+*** Example Route Handlers
+Key route handlers demonstrating the application's functionality:
+
+#+begin_src clojure
+;; handler.clj
+(defn home-handler [_req]
+  (layout "Welcome"
+          [:div {:class styles/welcome-section}
+           [:h1 {:class styles/welcome-heading}
+            "Welcome to XTDB Items Manager"]
+           [:p {:class styles/welcome-description}
+            "A modern web application showcasing XTDB integration"]]))
+
+(defn list-items-handler [{:keys [query-params]}]
+  (let [items (run-search @config/xtdb-node query-params)]
+    (layout "Items"
+            [:div {:class styles/container}
+             [:h1 "Items"]
+             (map render-item items)])))
+#+end_src
+
+*** XTDB Integration
+Database configuration and connection management:
+
+#+begin_src clojure
+;; config.clj
+(defstate xtdb-node
+  :start
+  (let [url (get-xtdb-url)]
+    (log/info "Starting XTDB client")
+    (-> (xtc/start-client url)
+        (wait-for-xtdb url 30)
+        atom))
+  :stop
+  (do
+    (log/info "Stopping XTDB client")
+    (.close @xtdb-node)))
+#+end_src
+
+** Dagger Pipeline
+
+*** Pipeline Configuration
+The CI/CD pipeline is implemented in Go using Dagger:
+
+#+begin_src go
+// main.go
+func (m *CljXtdbDevops) BuildCljWebApp(srcDir *dagger.Directory) *dagger.Container {
+    buildStage := dag.Container().From("clojure:openjdk-17").
+        WithMountedDirectory("/app", srcDir).
+        WithWorkdir("/app").
+        WithExec([]string{"clojure", "-T:build", "jar"})
+
+    jarFile := buildStage.File("target/my_app.jar")
+
+    return dag.Container().From("openjdk:20-slim").
+        WithFile("/app/target/my_app.jar", jarFile).
+        WithExposedPort(58950).
+        WithEntrypoint([]string{"java", "-jar", "/app/target/my_app.jar"})
+}
+
+func (m *CljXtdbDevops) BuildXTDB() *dagger.Container {
+    return dag.Container().From("ghcr.io/xtdb/xtdb:2.0.0-beta6").
+        WithEnvVariable("XTDB_ENABLE_QUERY_CACHE", "true").
+        WithEnvVariable("XTDB_QUERY_CACHE_SIZE", "10000").
+        WithExposedPort(3000).
+        WithExposedPort(8080)
+}
+#+end_src
+
+*** GitHub Actions Integration
+Workflow configuration for GitHub Actions:
+
+#+begin_src yaml
+# .github/workflows/dagger-build.yml
+name: Dagger Build
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  dagger-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v4
+      - uses: dagger/dagger-for-github@v7
+      - name: Build and test
+        run: dagger call build-and-publish-clj-web-app --src-dir my-app
+#+end_src
+
+* Development
+:PROPERTIES:
+:CUSTOM_ID: development
+:END:
+
+** Local Development Environment
+
+*** Setup Instructions
+1. Clone the repository
+2. Install dependencies:
+   - Docker
+   - Go 1.23+
+   - Dagger CLI
+3. Configure environment variables:
+   #+begin_src shell
+   export XTDB_HOST=localhost
+   #+end_src
+
+*** Development Scripts
+Utility script for common operations:
+
+#+begin_src shell
+#!/bin/bash
+# scripts/dagger-ops.sh
+
+run_local() {
+    echo "Starting local development environment..."
+    cd ci
+    dagger call run-local-web-app --src-dir ../my-app up \
+        --ports 58950:58950 \
+        --ports 3000:3000 \
+        --ports 8080:8080
+}
+
+run_db() {
+    echo "Starting database environment..."
+    cd ci
+    dagger call run-local-development up \
+        --ports 3000:3000 \
+        --ports 8080:8080
+}
+
+case "$1" in
+    "local") run_local ;;
+    "db") run_db ;;
+    *) show_help ;;
+esac
+#+end_src
+
+** Development Workflow
+
+*** Code Organization
+#+begin_src text
+.
+├── ci/                 # Dagger pipeline code
+├── my-app/            # Clojure application
+│   ├── src/
+│   ├── test/
+│   └── resources/
+└── scripts/           # Utility scripts
+#+end_src
+
+*** Testing Strategy
+- Unit tests with Clojure test framework
+- Integration tests with test containers
+- End-to-end tests with REPL-driven development
+
+* Getting Started with Clojure
+:PROPERTIES:
+:CUSTOM_ID: clojure-intro
+:END:
+
+** Basic Clojure Concepts
+
+*** Data Structures
+Common Clojure data structures and their usage:
+
+#+begin_src clojure
+;; Vectors (ordered collections)
+(def numbers [1 2 3 4 5])
+(def names ["Alice" "Bob" "Charlie"])
+
+;; Maps (key-value pairs)
+(def person {:name "Alice"
+             :age 30
+             :roles #{:developer :team-lead}})
+
+;; Sets (unique collections)
+(def technologies #{"Clojure" "XTDB" "HTMX"})
+
+;; Lists (linked lists)
+(def tasks '("Learn Clojure" "Build App" "Write Tests"))
+#+end_src
+
+*** Functions
+Examples of function definitions and usage:
+
+#+begin_src clojure
+;; Simple function definition
+(defn greet [name]
+  (str "Hello, " name "!"))
+
+;; Function with multiple arities
+(defn add
+  ([] 0)
+  ([x] x)
+  ([x y] (+ x y))
+  ([x y & more] (reduce + (+ x y) more)))
+
+;; Anonymous function (lambda)
+(def multiply-by-two #(* % 2))
+
+;; Higher-order function example
+(defn apply-twice [f x]
+  (f (f x)))
+#+end_src
+
+*** Web Application Example
+A simple route handler with Hiccup HTML generation:
+
+#+begin_src clojure
+(ns my-app.handler
+  (:require [hiccup.core :as hiccup]
+            [my-app.styles :as styles]))
+
+;; HTML template using Hiccup
+(defn layout [title content]
+  [:html
+   [:head
+    [:title title]
+    [:script {:src "https://unpkg.com/htmx.org@1.9.10"}]
+    [:script {:src "https://cdn.tailwindcss.com"}]]
+   [:body
+    [:div {:class styles/container}
+     content]]])
+
+;; Route handler with HTMX integration
+(defn items-list-handler [req]
+  (let [items (get-items @config/xtdb-node)]
+    {:status 200
+     :headers {"Content-Type" "text/html"}
+     :body (hiccup/html
+            (layout "Items List"
+                   [:div
+                    [:h1 {:class styles/heading} "Items"]
+                    [:ul {:class styles/list}
+                     (for [item items]
+                       [:li {:class styles/list-item
+                            :hx-get (str "/items/" (:xt/id item))
+                            :hx-trigger "click"
+                            :hx-target "#item-details"}
+                        (:name item)])]]))}))
+#+end_src
+
+These examples demonstrate key Clojure concepts and how they're used in the project. The combination of functional programming, immutable data structures, and REPL-driven development makes Clojure particularly well-suited for web development. 
+
+* References
+:PROPERTIES:
+:CUSTOM_ID: references
+:END:
+
+** Project Repository
+
+[GitHub Repository](https://github.com/chiefkemist/clj-xtdb-devops)
+
+** Additional Resources
+
+[XTDB Documentation](https://xtdb.io/docs/)
+[CDK for Terraform Documentation](https://www.terraform.io/cdktf/) 
