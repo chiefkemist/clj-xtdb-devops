@@ -30,4 +30,3 @@ jobs:
         run: |
           pwd
           dagger call build-and-publish-clj-web-app --src-dir my-app
-```
